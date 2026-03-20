@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: technitium
+  labels:
+    app.kubernetes.io/name: technitium
+    app.kubernetes.io/part-of: platform

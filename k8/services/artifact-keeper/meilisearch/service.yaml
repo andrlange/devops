@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: meilisearch
+  labels:
+    app.kubernetes.io/name: meilisearch
+    app.kubernetes.io/component: search
+    app.kubernetes.io/part-of: artifact-keeper
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: meilisearch
+    app.kubernetes.io/component: search
+  ports:
+    - name: http
+      port: 7700
+      targetPort: http
+      protocol: TCP

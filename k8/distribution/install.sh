@@ -1,0 +1,1440 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =============================================================================
+# install.sh — K8s DevOps Stack Distribution Installer
+# =============================================================================
+# Master installer inspired by Pivotal Labs' Iteration Zero approach.
+#
+# Three modes:
+#   - Iteration Zero (ZERO): Gather all configuration interactively
+#   - Implementation:        Install each phase individually
+#   - Operations:            Day-2 management commands
+#
+# Usage:
+#   ./install.sh                  # Interactive full setup
+#   ./install.sh zero             # Only Iteration Zero (gather config)
+#   ./install.sh phase <N>        # Install specific phase (1-5)
+#   ./install.sh status           # Show installation status
+#   ./install.sh validate         # Validate prerequisites
+# =============================================================================
+
+# --- Resolve paths -----------------------------------------------------------
+DIST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+K8_DIR="$(cd "${DIST_DIR}/.." && pwd)"
+CONFIG_FILE="${DIST_DIR}/.install-config"
+STATE_FILE="${DIST_DIR}/.install-state"
+
+# --- Source libraries --------------------------------------------------------
+source "${DIST_DIR}/lib/colors.sh"
+source "${DIST_DIR}/lib/prerequisites.sh"
+source "${DIST_DIR}/lib/helm.sh"
+source "${DIST_DIR}/lib/interactive.sh"
+
+# --- Source project config (defaults) ----------------------------------------
+if [[ -f "${K8_DIR}/config.env" ]]; then
+  source "${K8_DIR}/config.env"
+fi
+
+# =============================================================================
+# Iteration Zero — Gather all configuration interactively
+# =============================================================================
+cmd_zero() {
+  log_phase "Iteration Zero — Configuration Gathering"
+
+  log_info "This will walk you through ALL configuration parameters."
+  log_info "Each question has a sensible default shown in [brackets]."
+  log_info "Press ENTER to accept the default."
+  echo ""
+
+  # Load existing config if present
+  if [[ -f "$CONFIG_FILE" ]]; then
+    log_warn "Existing configuration found at $CONFIG_FILE"
+    if ask_yes_no "Load existing values as defaults?" "y"; then
+      source "$CONFIG_FILE"
+    fi
+  fi
+
+  # -------------------------------------------------------------------------
+  # 1. System Settings
+  # -------------------------------------------------------------------------
+  print_section "1. System Settings"
+  echo ""
+
+  local cfg_arch
+  cfg_arch=$(ask_choice "Target architecture" "arm64" "amd64")
+
+  local cfg_lima_vm_name
+  cfg_lima_vm_name=$(ask "Lima VM name" "${LIMA_VM_NAME:-k3s-server}")
+
+  local cfg_lima_cpus
+  while true; do
+    cfg_lima_cpus=$(ask "Lima VM CPUs" "${LIMA_CPUS:-8}")
+    if validate_integer_range "$cfg_lima_cpus" 2 32 "CPUs"; then break; fi
+  done
+
+  local cfg_lima_memory
+  while true; do
+    cfg_lima_memory=$(ask "Lima VM Memory (GB)" "${LIMA_MEMORY_GB:-48}")
+    if validate_integer_range "$cfg_lima_memory" 4 256 "Memory"; then break; fi
+  done
+
+  local cfg_lima_disk
+  while true; do
+    cfg_lima_disk=$(ask "Lima VM Disk (GB)" "${LIMA_DISK_GB:-200}")
+    if validate_integer_range "$cfg_lima_disk" 50 2000 "Disk"; then break; fi
+  done
+
+  # -------------------------------------------------------------------------
+  # 2. Network Settings
+  # -------------------------------------------------------------------------
+  print_section "2. Network Settings"
+  echo ""
+
+  log_info "Network settings will be auto-detected from vzNAT after VM creation."
+  log_info "These defaults are used as fallback only."
+  echo ""
+
+  local cfg_network_subnet
+  cfg_network_subnet=$(ask "Network subnet" "${NETWORK_SUBNET:-192.168.64.0/24}")
+
+  local cfg_network_gateway
+  cfg_network_gateway=$(ask "Network gateway" "${NETWORK_GATEWAY:-192.168.64.1}")
+
+  local cfg_metallb_range
+  cfg_metallb_range=$(ask "MetalLB IP range" "${METALLB_IP_RANGE:-192.168.64.200-192.168.64.210}")
+
+  # -------------------------------------------------------------------------
+  # 3. Domain Settings
+  # -------------------------------------------------------------------------
+  print_section "3. Domain Settings"
+  echo ""
+
+  local cfg_base_domain
+  while true; do
+    cfg_base_domain=$(ask "Base domain" "${BASE_DOMAIN:-development.cfapps.cool}")
+    if validate_domain "$cfg_base_domain"; then break; fi
+  done
+
+  local cfg_acme_email
+  while true; do
+    cfg_acme_email=$(ask "ACME email (for Let's Encrypt)" "${ACME_EMAIL:-admin@cfapps.cool}")
+    if validate_email "$cfg_acme_email"; then break; fi
+  done
+
+  # -------------------------------------------------------------------------
+  # 4. Container Registry
+  # -------------------------------------------------------------------------
+  print_section "4. Container Registry"
+  echo ""
+
+  local cfg_registry
+  cfg_registry=$(ask "Registry URL" "${REGISTRY:-artifactory.cfapps.cool}")
+
+  local cfg_registry_repo
+  cfg_registry_repo=$(ask "Registry repository" "${REGISTRY_REPO:-docker-local}")
+
+  local cfg_registry_user
+  cfg_registry_user=$(ask "Registry username" "${REGISTRY_USER:-}")
+
+  local cfg_registry_pass
+  if [[ -n "${REGISTRY_PASS:-}" ]]; then
+    log_info "Registry password already set. Enter new or press ENTER to keep."
+  fi
+  cfg_registry_pass=$(ask_password "Registry password/token")
+  if [[ -z "$cfg_registry_pass" ]] && [[ -n "${REGISTRY_PASS:-}" ]]; then
+    cfg_registry_pass="$REGISTRY_PASS"
+  fi
+
+  # -------------------------------------------------------------------------
+  # 5. DNS Provider
+  # -------------------------------------------------------------------------
+  print_section "5. DNS Provider (for cert-manager DNS-01 challenges)"
+  echo ""
+
+  local cfg_dns_provider
+  cfg_dns_provider=$(ask_choice "DNS provider" "gcp" "aws" "both")
+
+  local cfg_gcp_project_id=""
+  local cfg_gcp_sa_json_path=""
+  local cfg_aws_access_key=""
+  local cfg_aws_secret_key=""
+  local cfg_aws_region=""
+
+  if [[ "$cfg_dns_provider" == "gcp" ]] || [[ "$cfg_dns_provider" == "both" ]]; then
+    echo ""
+    printf "  ${BOLD}Google Cloud DNS${NC}\n"
+    cfg_gcp_project_id=$(ask "GCP Project ID" "${GCP_PROJECT_ID:-cfapps-cool}")
+    cfg_gcp_sa_json_path=$(ask_file "GCP Service Account JSON path" "" "optional")
+  fi
+
+  if [[ "$cfg_dns_provider" == "aws" ]] || [[ "$cfg_dns_provider" == "both" ]]; then
+    echo ""
+    printf "  ${BOLD}AWS Route53${NC}\n"
+    cfg_aws_access_key=$(ask "AWS Access Key ID" "${AWS_ACCESS_KEY:-}")
+    cfg_aws_secret_key=$(ask_password "AWS Secret Access Key")
+    cfg_aws_region=$(ask "AWS Region" "${AWS_REGION:-us-east-1}")
+  fi
+
+  # -------------------------------------------------------------------------
+  # 6. Passwords
+  # -------------------------------------------------------------------------
+  print_section "6. Service Passwords"
+  echo ""
+
+  local cfg_grafana_admin_pass
+  cfg_grafana_admin_pass=$(ask_password_or_generate "Grafana admin password" 24)
+
+  # -------------------------------------------------------------------------
+  # 7. Storage
+  # -------------------------------------------------------------------------
+  print_section "7. Storage Settings"
+  echo ""
+
+  local cfg_pv_base_path
+  cfg_pv_base_path=$(ask "Persistent volume base path" "${PV_BASE_PATH:-/data/persistent}")
+
+  # -------------------------------------------------------------------------
+  # Summary and Confirmation
+  # -------------------------------------------------------------------------
+  local summary_items=(
+    "Architecture=${cfg_arch}"
+    "Lima VM Name=${cfg_lima_vm_name}"
+    "Lima CPUs=${cfg_lima_cpus}"
+    "Lima Memory=${cfg_lima_memory}GB"
+    "Lima Disk=${cfg_lima_disk}GB"
+    "Network Subnet=${cfg_network_subnet}"
+    "MetalLB IP Range=${cfg_metallb_range}"
+    "Base Domain=${cfg_base_domain}"
+    "ACME Email=${cfg_acme_email}"
+    "Registry=${cfg_registry}"
+    "Registry Repo=${cfg_registry_repo}"
+    "Registry Username=${cfg_registry_user}"
+    "Registry Password=${cfg_registry_pass}"
+    "DNS Provider=${cfg_dns_provider}"
+    "GCP Project ID=${cfg_gcp_project_id}"
+    "GCP SA JSON=${cfg_gcp_sa_json_path}"
+    "AWS Access Key=${cfg_aws_access_key}"
+    "AWS Secret Key=${cfg_aws_secret_key}"
+    "AWS Region=${cfg_aws_region}"
+    "Grafana Admin Password=${cfg_grafana_admin_pass}"
+    "PV Base Path=${cfg_pv_base_path}"
+  )
+
+  if ! confirm_summary "Configuration Summary" "${summary_items[@]}"; then
+    log_warn "Aborted. No changes saved."
+    exit 0
+  fi
+
+  # -------------------------------------------------------------------------
+  # Save configuration
+  # -------------------------------------------------------------------------
+  cat > "$CONFIG_FILE" <<CFGEOF
+# =============================================================================
+# K8s DevOps Stack — Install Configuration
+# Generated by install.sh on $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# WARNING: Contains secrets. Do NOT commit to Git.
+# =============================================================================
+
+# --- System ------------------------------------------------------------------
+ARCH="${cfg_arch}"
+LIMA_VM_NAME="${cfg_lima_vm_name}"
+LIMA_CPUS=${cfg_lima_cpus}
+LIMA_MEMORY_GB=${cfg_lima_memory}
+LIMA_DISK_GB=${cfg_lima_disk}
+
+# --- Network -----------------------------------------------------------------
+NETWORK_SUBNET="${cfg_network_subnet}"
+NETWORK_GATEWAY="${cfg_network_gateway}"
+NETWORK_DNS="${cfg_network_gateway}"
+METALLB_IP_RANGE="${cfg_metallb_range}"
+
+# --- Domain ------------------------------------------------------------------
+BASE_DOMAIN="${cfg_base_domain}"
+ACME_EMAIL="${cfg_acme_email}"
+
+# --- Registry ----------------------------------------------------------------
+REGISTRY="${cfg_registry}"
+REGISTRY_REPO="${cfg_registry_repo}"
+REGISTRY_PULL_SECRET_NAME="artifact-keeper-pull"
+REGISTRY_USER="${cfg_registry_user}"
+REGISTRY_PASS="${cfg_registry_pass}"
+
+# --- DNS Provider ------------------------------------------------------------
+DNS_PROVIDER="${cfg_dns_provider}"
+GCP_PROJECT_ID="${cfg_gcp_project_id}"
+GCP_SA_JSON_PATH="${cfg_gcp_sa_json_path}"
+AWS_ACCESS_KEY="${cfg_aws_access_key}"
+AWS_SECRET_KEY="${cfg_aws_secret_key}"
+AWS_REGION="${cfg_aws_region}"
+
+# --- Passwords ---------------------------------------------------------------
+GRAFANA_ADMIN_PASSWORD="${cfg_grafana_admin_pass}"
+
+# --- Storage -----------------------------------------------------------------
+PV_BASE_PATH="${cfg_pv_base_path}"
+CFGEOF
+
+  chmod 600 "$CONFIG_FILE"
+  log_success "Configuration saved to $CONFIG_FILE"
+  echo ""
+  log_info "Next steps:"
+  echo "  1. Review the configuration:  cat ${CONFIG_FILE}"
+  echo "  2. Validate prerequisites:    ./install.sh validate"
+  echo "  3. Install Phase 1:           ./install.sh phase 1"
+  echo ""
+}
+
+# =============================================================================
+# Load saved configuration
+# =============================================================================
+load_config() {
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    log_error "No configuration found at $CONFIG_FILE"
+    log_info "Run './install.sh zero' first to generate configuration"
+    exit 1
+  fi
+  source "$CONFIG_FILE"
+  log_debug "Configuration loaded from $CONFIG_FILE"
+}
+
+# =============================================================================
+# Phase 1 — Foundation
+# =============================================================================
+# Lima VM, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager
+# =============================================================================
+install_phase_1() {
+  log_phase "Phase 1 — Foundation"
+  load_config
+  check_phase_prerequisites 1 "$STATE_FILE"
+
+  # --- 1.1 Lima VM + K3s ---
+  if ! component_is_installed "LIMA_K3S" "$STATE_FILE"; then
+    log_step "1.1 — Lima VM + K3s"
+
+    if limactl list --json 2>/dev/null | grep -q "\"name\":\"${LIMA_VM_NAME}\""; then
+      log_info "Lima VM '${LIMA_VM_NAME}' already exists"
+      local vm_status
+      vm_status=$(limactl list --json 2>/dev/null \
+        | grep "\"name\":\"${LIMA_VM_NAME}\"" \
+        | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['status'])" 2>/dev/null || echo "unknown")
+      if [[ "$vm_status" != "Running" ]]; then
+        log_info "Starting Lima VM..."
+        limactl start "$LIMA_VM_NAME"
+      else
+        log_info "Lima VM already running"
+      fi
+    else
+      log_info "Creating Lima VM '${LIMA_VM_NAME}'..."
+      limactl create --name="$LIMA_VM_NAME" "${K8_DIR}/bootstrap/lima.yaml"
+      limactl start "$LIMA_VM_NAME"
+      log_success "Lima VM created and started"
+    fi
+
+    # Get VM IP
+    VM_IP=$(limactl shell "$LIMA_VM_NAME" hostname -I | awk '{print $1}')
+    if [[ -z "$VM_IP" ]]; then
+      log_error "Could not determine VM IP address"
+      exit 1
+    fi
+    log_success "VM IP: $VM_IP"
+
+    # Install K3s
+    if limactl shell "$LIMA_VM_NAME" test -f /etc/rancher/k3s/k3s.yaml 2>/dev/null; then
+      log_info "K3s already installed in VM"
+    else
+      log_info "Installing K3s inside Lima VM..."
+      limactl shell "$LIMA_VM_NAME" /mnt/k8/bootstrap/install-k3s.sh "$VM_IP"
+      log_success "K3s installed"
+    fi
+
+    # Export kubeconfig
+    local kubeconfig_file="${HOME}/.kube/config-k3s"
+    mkdir -p "${HOME}/.kube"
+    limactl shell "$LIMA_VM_NAME" sudo cat /etc/rancher/k3s/k3s.yaml \
+      | sed "s/127\.0\.0\.1/${VM_IP}/g" \
+      | sed "s/default/k3s-devops/g" \
+      > "$kubeconfig_file"
+    chmod 600 "$kubeconfig_file"
+    export KUBECONFIG="$kubeconfig_file"
+    log_success "Kubeconfig written to $kubeconfig_file"
+
+    # Wait for node
+    log_info "Waiting for K3s node to become Ready..."
+    local attempts=0
+    while ! kubectl get nodes --request-timeout=120s 2>/dev/null | grep -q ' Ready'; do
+      attempts=$((attempts + 1))
+      if [[ $attempts -ge 30 ]]; then
+        log_error "K3s node did not become Ready within 60s"
+        exit 1
+      fi
+      sleep 2
+    done
+    log_success "K3s node is Ready"
+
+    mark_component_installed "LIMA_K3S" "$STATE_FILE"
+  else
+    log_info "Lima VM + K3s already installed, skipping"
+    # Still need to set KUBECONFIG
+    export KUBECONFIG="${HOME}/.kube/config-k3s"
+  fi
+
+  # --- 1.2 Pull Secrets ---
+  if ! component_is_installed "PULL_SECRETS" "$STATE_FILE"; then
+    log_step "1.2 — Bootstrap Pull Secrets"
+
+    if [[ -z "${REGISTRY_USER:-}" ]] || [[ -z "${REGISTRY_PASS:-}" ]]; then
+      log_warn "Registry credentials not set in config. Skipping pull secrets."
+    else
+      local namespaces=("openbao" "external-secrets" "metallb-system" "traefik" "cert-manager")
+      for ns in "${namespaces[@]}"; do
+        ensure_namespace "$ns"
+        if ! kubectl get secret "${REGISTRY_PULL_SECRET_NAME}" -n "$ns" &>/dev/null; then
+          kubectl create secret docker-registry "${REGISTRY_PULL_SECRET_NAME}" \
+            --docker-server="$REGISTRY" \
+            --docker-username="$REGISTRY_USER" \
+            --docker-password="$REGISTRY_PASS" \
+            -n "$ns"
+          log_success "Created pull secret in '$ns'"
+        else
+          log_info "Pull secret already exists in '$ns'"
+        fi
+      done
+
+      # Configure containerd registry
+      log_info "Configuring containerd registry credentials..."
+      limactl shell "$LIMA_VM_NAME" sudo tee /etc/rancher/k3s/registries.yaml > /dev/null <<REGEOF
+configs:
+  "${REGISTRY}":
+    auth:
+      username: "${REGISTRY_USER}"
+      password: "${REGISTRY_PASS}"
+    tls:
+      insecure_skip_verify: false
+REGEOF
+
+      limactl shell "$LIMA_VM_NAME" sudo systemctl restart k3s
+      sleep 5
+      local attempts=0
+      while ! kubectl get nodes &>/dev/null; do
+        attempts=$((attempts + 1))
+        if [[ $attempts -ge 30 ]]; then
+          log_error "K3s did not restart within 30s"
+          exit 1
+        fi
+        sleep 1
+      done
+      log_success "Registry credentials configured"
+    fi
+
+    mark_component_installed "PULL_SECRETS" "$STATE_FILE"
+  else
+    log_info "Pull secrets already configured, skipping"
+  fi
+
+  # --- 1.3 OpenBao ---
+  if ! component_is_installed "OPENBAO" "$STATE_FILE"; then
+    log_step "1.3 — OpenBao"
+
+    ensure_namespace "openbao"
+    helm_install_if_needed "openbao" "${K8_DIR}/services/openbao" "openbao"
+
+    log_info "Waiting for OpenBao pod to be Running..."
+    wait_for_pod_running "openbao" "app.kubernetes.io/name=openbao" 120
+
+    echo ""
+    printf "  ${BOLD}${YELLOW}=== INTERACTIVE: OpenBao Init & Unseal ===${NC}\n"
+    echo ""
+    echo "  OpenBao is running but needs initialization and unsealing."
+    echo "  In a separate terminal, run:"
+    echo ""
+    echo "    export KUBECONFIG=\${HOME}/.kube/config-k3s"
+    echo "    kubectl exec -n openbao openbao-0 -- bao operator init"
+    echo ""
+    echo "    >> SAVE the unseal keys and root token in your password manager! <<"
+    echo ""
+    echo "    kubectl exec -n openbao openbao-0 -- bao operator unseal <key1>"
+    echo "    kubectl exec -n openbao openbao-0 -- bao operator unseal <key2>"
+    echo "    kubectl exec -n openbao openbao-0 -- bao operator unseal <key3>"
+    echo ""
+    read -rp "  Press ENTER when OpenBao is initialized and unsealed... "
+
+    # Verify unsealed
+    local sealed
+    sealed=$(kubectl exec -n openbao openbao-0 -- bao status -format=json 2>/dev/null \
+      | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['sealed'])" 2>/dev/null || echo "true")
+    if [[ "$sealed" == "false" ]]; then
+      log_success "OpenBao is unsealed and ready"
+    else
+      log_warn "OpenBao may still be sealed. Continuing anyway..."
+    fi
+
+    echo ""
+    printf "  ${BOLD}${YELLOW}=== INTERACTIVE: Bootstrap Secrets ===${NC}\n"
+    echo ""
+    echo "  Store your secrets in OpenBao now (DNS credentials, registry, etc.)"
+    echo "  See bootstrap.sh for detailed instructions."
+    echo ""
+    read -rp "  Press ENTER when bootstrap secrets have been stored... "
+
+    mark_component_installed "OPENBAO" "$STATE_FILE"
+  else
+    log_info "OpenBao already installed, skipping"
+  fi
+
+  # --- 1.4 External Secrets Operator ---
+  if ! component_is_installed "ESO" "$STATE_FILE"; then
+    log_step "1.4 — External Secrets Operator"
+
+    ensure_namespace "external-secrets"
+    helm_install_if_needed "external-secrets" "${K8_DIR}/platform/external-secrets" "external-secrets"
+    wait_for_pods "external-secrets" 120
+
+    if [[ -f "${K8_DIR}/platform/external-secrets/cluster-secret-store.yaml" ]]; then
+      apply_manifest "${K8_DIR}/platform/external-secrets/cluster-secret-store.yaml"
+    fi
+    if [[ -f "${K8_DIR}/platform/external-secrets/registry-pull-secret.yaml" ]]; then
+      apply_manifest "${K8_DIR}/platform/external-secrets/registry-pull-secret.yaml"
+    fi
+
+    log_info "Waiting for ClusterSecretStore to become valid..."
+    local attempts=0
+    while true; do
+      local css_status
+      css_status=$(kubectl get clustersecretstore -o jsonpath='{.items[0].status.conditions[0].status}' 2>/dev/null || echo "Unknown")
+      if [[ "$css_status" == "True" ]]; then
+        log_success "ClusterSecretStore is valid"
+        break
+      fi
+      attempts=$((attempts + 1))
+      if [[ $attempts -ge 30 ]]; then
+        log_warn "ClusterSecretStore did not become valid within 60s. Continuing..."
+        break
+      fi
+      sleep 2
+    done
+
+    mark_component_installed "ESO" "$STATE_FILE"
+  else
+    log_info "ESO already installed, skipping"
+  fi
+
+  # --- 1.5 MetalLB ---
+  if ! component_is_installed "METALLB" "$STATE_FILE"; then
+    log_step "1.5 — MetalLB"
+
+    ensure_namespace "metallb-system"
+    helm_install_if_needed "metallb" "${K8_DIR}/infrastructure/metallb" "metallb-system"
+    wait_for_pods "metallb-system" 120
+
+    if [[ -f "${K8_DIR}/infrastructure/metallb/ip-pool.yaml" ]]; then
+      apply_manifest "${K8_DIR}/infrastructure/metallb/ip-pool.yaml"
+    fi
+
+    mark_component_installed "METALLB" "$STATE_FILE"
+  else
+    log_info "MetalLB already installed, skipping"
+  fi
+
+  # --- 1.6 Traefik ---
+  if ! component_is_installed "TRAEFIK" "$STATE_FILE"; then
+    log_step "1.6 — Traefik"
+
+    ensure_namespace "traefik"
+    helm_install_if_needed "traefik" "${K8_DIR}/infrastructure/traefik" "traefik"
+
+    log_info "Waiting for Traefik LoadBalancer IP..."
+    local lb_ip
+    lb_ip=$(get_lb_ip "traefik" "traefik" 60 || echo "")
+    if [[ -n "$lb_ip" ]]; then
+      log_success "Traefik LoadBalancer IP: $lb_ip"
+      echo ""
+      echo "  Add to your DNS or /etc/hosts:"
+      echo "  $lb_ip  *.${BASE_DOMAIN}"
+    else
+      log_warn "No LoadBalancer IP assigned yet"
+    fi
+
+    mark_component_installed "TRAEFIK" "$STATE_FILE"
+  else
+    log_info "Traefik already installed, skipping"
+  fi
+
+  # --- 1.7 cert-manager ---
+  if ! component_is_installed "CERTMANAGER" "$STATE_FILE"; then
+    log_step "1.7 — cert-manager"
+
+    ensure_namespace "cert-manager"
+    helm_install_if_needed "cert-manager" "${K8_DIR}/infrastructure/cert-manager" "cert-manager"
+    wait_for_pods "cert-manager" 120
+
+    if [[ -f "${K8_DIR}/infrastructure/cert-manager/dns-external-secret.yaml" ]]; then
+      apply_manifest "${K8_DIR}/infrastructure/cert-manager/dns-external-secret.yaml"
+      sleep 5
+    fi
+
+    export GCP_PROJECT_ID="${GCP_PROJECT_ID:-}"
+    if [[ -f "${K8_DIR}/infrastructure/cert-manager/clusterissuer.yaml" ]]; then
+      apply_manifest_envsubst "${K8_DIR}/infrastructure/cert-manager/clusterissuer.yaml"
+    fi
+
+    if [[ -f "${K8_DIR}/infrastructure/cert-manager/wildcard-certificate.yaml" ]]; then
+      apply_manifest "${K8_DIR}/infrastructure/cert-manager/wildcard-certificate.yaml"
+    fi
+
+    # Apply TLS store
+    if [[ -f "${K8_DIR}/infrastructure/traefik/tls-store.yaml" ]]; then
+      apply_manifest "${K8_DIR}/infrastructure/traefik/tls-store.yaml"
+    fi
+
+    mark_component_installed "CERTMANAGER" "$STATE_FILE"
+  else
+    log_info "cert-manager already installed, skipping"
+  fi
+
+  mark_phase_complete 1 "$STATE_FILE"
+  log_success "Phase 1 — Foundation complete"
+  echo ""
+  log_info "Next step: ./install.sh phase 2"
+  echo ""
+}
+
+# =============================================================================
+# Phase 2 — Platform
+# =============================================================================
+# ArgoCD, Portainer, Garage, Technitium, Velero
+# =============================================================================
+install_phase_2() {
+  log_phase "Phase 2 — Platform"
+  load_config
+  check_phase_prerequisites 2 "$STATE_FILE"
+  export KUBECONFIG="${HOME}/.kube/config-k3s"
+
+  # --- 2.1 ArgoCD ---
+  if ! component_is_installed "ARGOCD" "$STATE_FILE"; then
+    log_step "2.1 — ArgoCD"
+    ensure_namespace "argocd"
+
+    if [[ -d "${K8_DIR}/platform/argocd" ]]; then
+      helm_install_if_needed "argocd" "${K8_DIR}/platform/argocd" "argocd"
+      wait_for_pods "argocd" 180
+      log_success "ArgoCD installed"
+    else
+      log_warn "ArgoCD chart not found at ${K8_DIR}/platform/argocd — skipping"
+    fi
+
+    mark_component_installed "ARGOCD" "$STATE_FILE"
+  else
+    log_info "ArgoCD already installed, skipping"
+  fi
+
+  # --- 2.2 Portainer ---
+  if ! component_is_installed "PORTAINER" "$STATE_FILE"; then
+    log_step "2.2 — Portainer"
+    ensure_namespace "portainer"
+
+    if [[ -d "${K8_DIR}/platform/portainer" ]]; then
+      helm_install_if_needed "portainer" "${K8_DIR}/platform/portainer" "portainer"
+      wait_for_pods "portainer" 120
+      log_success "Portainer installed"
+    else
+      log_warn "Portainer chart not found at ${K8_DIR}/platform/portainer — skipping"
+    fi
+
+    mark_component_installed "PORTAINER" "$STATE_FILE"
+  else
+    log_info "Portainer already installed, skipping"
+  fi
+
+  # --- 2.3 Garage (S3-compatible storage) ---
+  if ! component_is_installed "GARAGE" "$STATE_FILE"; then
+    log_step "2.3 — Garage"
+    ensure_namespace "garage"
+
+    if [[ -d "${K8_DIR}/platform/garage" ]]; then
+      helm_install_if_needed "garage" "${K8_DIR}/platform/garage" "garage"
+      wait_for_pods "garage" 120
+      log_success "Garage installed"
+    else
+      log_warn "Garage chart not found at ${K8_DIR}/platform/garage — skipping"
+    fi
+
+    mark_component_installed "GARAGE" "$STATE_FILE"
+  else
+    log_info "Garage already installed, skipping"
+  fi
+
+  # --- 2.4 Technitium DNS ---
+  if ! component_is_installed "TECHNITIUM" "$STATE_FILE"; then
+    log_step "2.4 — Technitium DNS"
+    ensure_namespace "technitium"
+
+    if [[ -d "${K8_DIR}/platform/technitium" ]]; then
+      helm_install_if_needed "technitium" "${K8_DIR}/platform/technitium" "technitium"
+      wait_for_pods "technitium" 120
+      log_success "Technitium DNS installed"
+    else
+      log_warn "Technitium chart not found at ${K8_DIR}/platform/technitium — skipping"
+    fi
+
+    mark_component_installed "TECHNITIUM" "$STATE_FILE"
+  else
+    log_info "Technitium DNS already installed, skipping"
+  fi
+
+  # --- 2.5 Velero ---
+  if ! component_is_installed "VELERO" "$STATE_FILE"; then
+    log_step "2.5 — Velero"
+    ensure_namespace "velero"
+
+    if [[ -d "${K8_DIR}/velero" ]]; then
+      helm_install_if_needed "velero" "${K8_DIR}/velero" "velero"
+      wait_for_pods "velero" 120
+      log_success "Velero installed"
+    else
+      log_warn "Velero chart not found at ${K8_DIR}/velero — skipping"
+    fi
+
+    mark_component_installed "VELERO" "$STATE_FILE"
+  else
+    log_info "Velero already installed, skipping"
+  fi
+
+  mark_phase_complete 2 "$STATE_FILE"
+  log_success "Phase 2 — Platform complete"
+  echo ""
+  log_info "Next step: ./install.sh phase 3"
+  echo ""
+}
+
+# =============================================================================
+# Phase 3 — Monitoring
+# =============================================================================
+# Loki, Mimir, Tempo, Alloy, kube-state-metrics, node-exporter, Grafana
+# =============================================================================
+install_phase_3() {
+  log_phase "Phase 3 — Monitoring"
+  load_config
+  check_phase_prerequisites 3 "$STATE_FILE"
+  export KUBECONFIG="${HOME}/.kube/config-k3s"
+
+  # --- 3.1 Loki ---
+  if ! component_is_installed "LOKI" "$STATE_FILE"; then
+    log_step "3.1 — Loki"
+    ensure_namespace "monitoring"
+
+    if [[ -d "${K8_DIR}/monitoring/loki" ]]; then
+      helm_install_if_needed "loki" "${K8_DIR}/monitoring/loki" "monitoring"
+      wait_for_pods "monitoring" 180 || true
+      log_success "Loki installed"
+    else
+      log_warn "Loki chart not found at ${K8_DIR}/monitoring/loki — skipping"
+    fi
+
+    mark_component_installed "LOKI" "$STATE_FILE"
+  else
+    log_info "Loki already installed, skipping"
+  fi
+
+  # --- 3.2 Mimir ---
+  if ! component_is_installed "MIMIR" "$STATE_FILE"; then
+    log_step "3.2 — Mimir"
+    ensure_namespace "monitoring"
+
+    if [[ -d "${K8_DIR}/monitoring/mimir" ]]; then
+      helm_install_if_needed "mimir" "${K8_DIR}/monitoring/mimir" "monitoring"
+      wait_for_pods "monitoring" 180 || true
+      log_success "Mimir installed"
+    else
+      log_warn "Mimir chart not found at ${K8_DIR}/monitoring/mimir — skipping"
+    fi
+
+    mark_component_installed "MIMIR" "$STATE_FILE"
+  else
+    log_info "Mimir already installed, skipping"
+  fi
+
+  # --- 3.3 Tempo ---
+  if ! component_is_installed "TEMPO" "$STATE_FILE"; then
+    log_step "3.3 — Tempo"
+    ensure_namespace "monitoring"
+
+    if [[ -d "${K8_DIR}/monitoring/tempo" ]]; then
+      helm_install_if_needed "tempo" "${K8_DIR}/monitoring/tempo" "monitoring"
+      wait_for_pods "monitoring" 180 || true
+      log_success "Tempo installed"
+    else
+      log_warn "Tempo chart not found at ${K8_DIR}/monitoring/tempo — skipping"
+    fi
+
+    mark_component_installed "TEMPO" "$STATE_FILE"
+  else
+    log_info "Tempo already installed, skipping"
+  fi
+
+  # --- 3.4 Alloy (collector) ---
+  if ! component_is_installed "ALLOY" "$STATE_FILE"; then
+    log_step "3.4 — Alloy"
+    ensure_namespace "monitoring"
+
+    if [[ -d "${K8_DIR}/monitoring/alloy" ]]; then
+      helm_install_if_needed "alloy" "${K8_DIR}/monitoring/alloy" "monitoring"
+      wait_for_pods "monitoring" 120 || true
+      log_success "Alloy installed"
+    else
+      log_warn "Alloy chart not found at ${K8_DIR}/monitoring/alloy — skipping"
+    fi
+
+    mark_component_installed "ALLOY" "$STATE_FILE"
+  else
+    log_info "Alloy already installed, skipping"
+  fi
+
+  # --- 3.5 kube-state-metrics ---
+  if ! component_is_installed "KUBE_STATE_METRICS" "$STATE_FILE"; then
+    log_step "3.5 — kube-state-metrics"
+    ensure_namespace "monitoring"
+
+    if [[ -d "${K8_DIR}/monitoring/kube-state-metrics" ]]; then
+      helm_install_if_needed "kube-state-metrics" "${K8_DIR}/monitoring/kube-state-metrics" "monitoring"
+      wait_for_pods "monitoring" 120 || true
+      log_success "kube-state-metrics installed"
+    else
+      log_warn "kube-state-metrics chart not found — skipping"
+    fi
+
+    mark_component_installed "KUBE_STATE_METRICS" "$STATE_FILE"
+  else
+    log_info "kube-state-metrics already installed, skipping"
+  fi
+
+  # --- 3.6 node-exporter ---
+  if ! component_is_installed "NODE_EXPORTER" "$STATE_FILE"; then
+    log_step "3.6 — node-exporter"
+    ensure_namespace "monitoring"
+
+    if [[ -d "${K8_DIR}/monitoring/node-exporter" ]]; then
+      helm_install_if_needed "node-exporter" "${K8_DIR}/monitoring/node-exporter" "monitoring"
+      wait_for_pods "monitoring" 120 || true
+      log_success "node-exporter installed"
+    else
+      log_warn "node-exporter chart not found — skipping"
+    fi
+
+    mark_component_installed "NODE_EXPORTER" "$STATE_FILE"
+  else
+    log_info "node-exporter already installed, skipping"
+  fi
+
+  # --- 3.7 Grafana ---
+  if ! component_is_installed "GRAFANA" "$STATE_FILE"; then
+    log_step "3.7 — Grafana"
+    ensure_namespace "monitoring"
+
+    if [[ -d "${K8_DIR}/monitoring/grafana" ]]; then
+      local grafana_args=()
+      if [[ -n "${GRAFANA_ADMIN_PASSWORD:-}" ]]; then
+        grafana_args+=(--set "grafana.adminPassword=${GRAFANA_ADMIN_PASSWORD}")
+      fi
+      helm_install_if_needed "grafana" "${K8_DIR}/monitoring/grafana" "monitoring" "${grafana_args[@]}"
+      wait_for_pods "monitoring" 120 || true
+      log_success "Grafana installed"
+    else
+      log_warn "Grafana chart not found at ${K8_DIR}/monitoring/grafana — skipping"
+    fi
+
+    mark_component_installed "GRAFANA" "$STATE_FILE"
+  else
+    log_info "Grafana already installed, skipping"
+  fi
+
+  mark_phase_complete 3 "$STATE_FILE"
+  log_success "Phase 3 — Monitoring complete"
+  echo ""
+  log_info "Grafana: https://grafana.${BASE_DOMAIN}"
+  log_info "Next step: ./install.sh phase 4"
+  echo ""
+}
+
+# =============================================================================
+# Phase 4 — Services
+# =============================================================================
+# artifact-keeper (Backend + Web + Trivy), PostgreSQL, Meilisearch
+# =============================================================================
+install_phase_4() {
+  log_phase "Phase 4 — Services (artifact-keeper)"
+  load_config
+  check_phase_prerequisites 4 "$STATE_FILE"
+  export KUBECONFIG="${HOME}/.kube/config-k3s"
+
+  # --- Create Garage key for artifacts bucket ---
+  if ! component_is_installed "phase4_garage_key" "$STATE_FILE"; then
+    log_step "Creating Garage API key for artifacts bucket..."
+    local key_output
+    key_output=$(kubectl exec -n garage garage-0 -- /garage key create artifacts-key 2>&1)
+    local ak=$(echo "$key_output" | grep "Key ID" | awk '{print $NF}')
+    local sk=$(echo "$key_output" | grep "Secret key" | awk '{print $NF}')
+    kubectl exec -n garage garage-0 -- /garage bucket allow --read --write artifacts --key artifacts-key &>/dev/null
+
+    # Store in OpenBao
+    kubectl exec -n openbao openbao-0 -- bao kv put secret/garage/artifacts \
+      access_key="$ak" secret_key="$sk" &>/dev/null
+    log_success "Garage artifacts key created and stored in OpenBao"
+    mark_component_installed "phase4_garage_key" "$STATE_FILE"
+  fi
+
+  # --- Store artifact-keeper secrets in OpenBao ---
+  if ! component_is_installed "phase4_secrets" "$STATE_FILE"; then
+    log_step "Storing artifact-keeper secrets in OpenBao..."
+    kubectl exec -n openbao openbao-0 -- bao kv put secret/artifact-keeper/postgres \
+      username="artifact_keeper" password="$(openssl rand -base64 16)" database="artifact_keeper" &>/dev/null
+    kubectl exec -n openbao openbao-0 -- bao kv put secret/artifact-keeper/meilisearch \
+      master_key="$(openssl rand -hex 16)" &>/dev/null
+    local ak_admin_pass=$(openssl rand -base64 16)
+    kubectl exec -n openbao openbao-0 -- bao kv put secret/artifact-keeper/app \
+      jwt_secret="$(openssl rand -base64 32)" \
+      admin_password="$ak_admin_pass" \
+      migration_encryption_key="$(openssl rand -base64 32)" &>/dev/null
+    log_success "Secrets stored in OpenBao"
+    echo ""
+    echo -e "  ${BOLD}artifact-keeper admin password: ${ak_admin_pass}${NC}"
+    echo -e "  ${YELLOW}Save this password in your password manager!${NC}"
+    echo ""
+    mark_component_installed "phase4_secrets" "$STATE_FILE"
+  fi
+
+  # --- Deploy artifact-keeper stack ---
+  if ! component_is_installed "phase4_artifact_keeper" "$STATE_FILE"; then
+    log_step "Deploying artifact-keeper (PostgreSQL, Meilisearch, Backend, Web, Trivy)..."
+    kubectl apply -k "${K8_DIR}/services/artifact-keeper/" 2>&1 | grep -v "Warning"
+    log_info "Waiting for pods..."
+    wait_for_pods "artifact-keeper" 180
+    log_success "artifact-keeper deployed"
+    mark_component_installed "phase4_artifact_keeper" "$STATE_FILE"
+  fi
+
+  mark_phase_complete 4 "$STATE_FILE"
+  log_success "Phase 4 complete — artifact-keeper available at https://artifacts.${PLATFORM_DOMAIN:-development.cfapps.cool}"
+  echo ""
+}
+
+# =============================================================================
+# Phase 5 — GitLab CE + Runner
+# =============================================================================
+install_phase_5() {
+  log_phase "Phase 5 — GitLab CE + Runner"
+  load_config
+  check_phase_prerequisites 5 "$STATE_FILE"
+  export KUBECONFIG="${HOME}/.kube/config-k3s"
+
+  local GITLAB_DOMAIN="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+
+  # --- Store GitLab root password ---
+  if ! component_is_installed "phase5_secrets" "$STATE_FILE"; then
+    log_step "Storing GitLab secrets in OpenBao..."
+    local gitlab_root_pass=$(openssl rand -base64 16)
+    kubectl exec -n openbao openbao-0 -- bao kv put secret/gitlab/admin \
+      root_password="$gitlab_root_pass" &>/dev/null
+    log_success "GitLab root password stored"
+    echo ""
+    echo -e "  ${BOLD}GitLab root password: ${gitlab_root_pass}${NC}"
+    echo -e "  ${YELLOW}Save this password in your password manager!${NC}"
+    echo ""
+    mark_component_installed "phase5_secrets" "$STATE_FILE"
+  fi
+
+  # --- Deploy GitLab CE ---
+  if ! component_is_installed "phase5_gitlab" "$STATE_FILE"; then
+    log_step "Deploying GitLab CE (this takes 5-10 minutes to start)..."
+    kubectl apply -k "${K8_DIR}/services/gitlab-ce/" 2>&1 | grep -v "Warning"
+
+    log_info "Waiting for GitLab to start (up to 15 minutes)..."
+    local attempts=0
+    while true; do
+      local ready=$(kubectl get pod gitlab-0 -n gitlab -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || echo "false")
+      if [[ "$ready" == "true" ]]; then
+        log_success "GitLab is Ready"
+        break
+      fi
+      attempts=$((attempts + 1))
+      if [[ $attempts -ge 60 ]]; then
+        log_warn "GitLab not Ready after 15 minutes. It may still be starting."
+        log_info "Check with: kubectl get pods -n gitlab"
+        break
+      fi
+      sleep 15
+    done
+    mark_component_installed "phase5_gitlab" "$STATE_FILE"
+  fi
+
+  # --- Register and deploy GitLab Runner ---
+  if ! component_is_installed "phase5_runner" "$STATE_FILE"; then
+    log_step "Registering GitLab Runner..."
+
+    # Wait for GitLab API to be available
+    log_info "Waiting for GitLab API..."
+    local api_ready=false
+    for i in $(seq 1 20); do
+      local code=$(curl -sk -o /dev/null -w "%{http_code}" "https://gitlab.${GITLAB_DOMAIN}/-/readiness" 2>/dev/null)
+      if [[ "$code" == "200" ]]; then
+        api_ready=true
+        break
+      fi
+      sleep 10
+    done
+
+    if [[ "$api_ready" != "true" ]]; then
+      log_warn "GitLab API not reachable. Skipping runner registration."
+      log_info "Register manually later: ./install.sh phase 5"
+      mark_phase_complete 5 "$STATE_FILE"
+      return 0
+    fi
+
+    # Create PAT via rails console
+    log_info "Creating temporary access token..."
+    local pat=$(kubectl exec -n gitlab gitlab-0 -- gitlab-rails runner "
+      token = User.find_by_username('root').personal_access_tokens.create!(
+        name: 'runner-setup-$(date +%s)',
+        scopes: ['api', 'create_runner'],
+        expires_at: 1.hour.from_now
+      )
+      puts token.token
+    " 2>/dev/null | tail -1)
+
+    if [[ -z "$pat" || "$pat" == *"Error"* ]]; then
+      log_warn "Could not create access token. Skipping runner registration."
+      mark_phase_complete 5 "$STATE_FILE"
+      return 0
+    fi
+
+    # Register instance runner via API
+    log_info "Registering instance runner..."
+    local runner_response=$(curl -sk --request POST "https://gitlab.${GITLAB_DOMAIN}/api/v4/user/runners" \
+      --header "PRIVATE-TOKEN: ${pat}" \
+      --form "runner_type=instance_type" \
+      --form "description=k8s-runner" \
+      --form "tag_list=k8s,docker" 2>/dev/null)
+
+    local runner_token=$(echo "$runner_response" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('token',''))" 2>/dev/null)
+
+    if [[ -z "$runner_token" ]]; then
+      log_warn "Runner registration failed. Register manually later."
+      mark_phase_complete 5 "$STATE_FILE"
+      return 0
+    fi
+
+    # Store runner token in OpenBao
+    kubectl exec -n openbao openbao-0 -- bao kv put secret/gitlab/runner \
+      token="$runner_token" &>/dev/null
+    log_success "Runner registered and token stored in OpenBao"
+
+    # Deploy GitLab Runner
+    log_step "Deploying GitLab Runner..."
+    ensure_namespace "gitlab-runner"
+    ensure_namespace "gitlab-runner-jobs"
+    helm_install_if_needed "gitlab-runner" "${K8_DIR}/services/gitlab-ce/runner" "gitlab-runner"
+    wait_for_pods "gitlab-runner" 60
+    log_success "GitLab Runner deployed with Kubernetes executor"
+    mark_component_installed "phase5_runner" "$STATE_FILE"
+  fi
+
+  mark_phase_complete 5 "$STATE_FILE"
+  echo ""
+  log_success "Phase 5 complete"
+  echo ""
+  echo -e "  ${BOLD}GitLab CE:${NC}     https://gitlab.${GITLAB_DOMAIN} (root)"
+  echo -e "  ${BOLD}GitLab SSH:${NC}    192.168.64.202:22"
+  echo -e "  ${BOLD}GitLab Runner:${NC} k8s-runner (Kubernetes executor)"
+  echo -e "  ${BOLD}Job Namespace:${NC} gitlab-runner-jobs"
+  echo ""
+}
+
+# =============================================================================
+# Phase 6 — Cloud Foundry (Korifi) [OPTIONAL]
+# =============================================================================
+# Gateway API, Contour, kpack, Service Binding, Korifi
+# =============================================================================
+install_phase_6() {
+  log_phase "Phase 6 — Cloud Foundry (Korifi) [OPTIONAL]"
+  load_config
+  # Phase 6 only requires Phase 1-3, not 4-5
+  # Custom prerequisite check instead of check_phase_prerequisites
+  export KUBECONFIG="${HOME}/.kube/config-k3s"
+
+  local CF_DOMAIN="${APPS_DOMAIN:-app.cfapps.cool}"
+
+  # --- Install QEMU user-static ---
+  if ! component_is_installed "phase6_qemu" "$STATE_FILE"; then
+    log_step "Installing QEMU user-static in Lima VM..."
+    limactl shell "${LIMA_VM_NAME:-k3s-server}" sudo apt install -y qemu-user-static &>/dev/null
+    log_success "QEMU user-static installed"
+    mark_component_installed "phase6_qemu" "$STATE_FILE"
+  fi
+
+  # --- Install Gateway API CRDs ---
+  if ! component_is_installed "phase6_gateway_api" "$STATE_FILE"; then
+    log_step "Installing Gateway API CRDs..."
+    kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml 2>&1 | tail -3
+    log_success "Gateway API CRDs installed"
+    mark_component_installed "phase6_gateway_api" "$STATE_FILE"
+  fi
+
+  # --- Install Contour ---
+  if ! component_is_installed "phase6_contour" "$STATE_FILE"; then
+    log_step "Installing Contour (Gateway API controller)..."
+    ensure_namespace "projectcontour"
+    # Note: Images need to be imported first
+    helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
+    helm install contour bitnami/contour \
+      -n projectcontour \
+      --set contour.gatewayAPIEnabled=true \
+      --set envoy.service.type=LoadBalancer \
+      --set envoy.service.annotations."metallb\.universe\.tf/loadBalancerIPs"="192.168.64.203" \
+      2>&1 | tail -3
+    wait_for_pods "projectcontour" 120
+    log_success "Contour installed on 192.168.64.203"
+    mark_component_installed "phase6_contour" "$STATE_FILE"
+  fi
+
+  # --- Install kpack ---
+  if ! component_is_installed "phase6_kpack" "$STATE_FILE"; then
+    log_step "Installing kpack..."
+    kubectl apply -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.0/release-0.17.0.yaml 2>&1 | tail -3
+    wait_for_pods "kpack" 120
+    log_success "kpack installed"
+    mark_component_installed "phase6_kpack" "$STATE_FILE"
+  fi
+
+  # --- Install Service Binding Runtime ---
+  if ! component_is_installed "phase6_servicebinding" "$STATE_FILE"; then
+    log_step "Installing Service Binding Runtime..."
+    kubectl apply -f https://github.com/servicebinding/runtime/releases/download/v1.0.0/servicebinding-runtime-v1.0.0.yaml 2>&1 | tail -3
+    wait_for_pods "servicebinding-system" 60
+    log_success "Service Binding Runtime installed"
+    mark_component_installed "phase6_servicebinding" "$STATE_FILE"
+  fi
+
+  # --- Create CF namespaces and registry credentials ---
+  if ! component_is_installed "phase6_namespaces" "$STATE_FILE"; then
+    log_step "Creating CF namespaces..."
+    ensure_namespace "cf"
+    ensure_namespace "korifi"
+    ensure_namespace "korifi-gateway"
+
+    # Registry credentials for kpack builds
+    kubectl -n cf create secret docker-registry image-registry-credentials \
+      --docker-server="${REGISTRY:-artifactory.cfapps.cool}" \
+      --docker-username="${REGISTRY_USER:-dev}" \
+      --docker-password="${REGISTRY_PASS:-}" \
+      --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -1
+
+    log_success "CF namespaces and credentials created"
+    mark_component_installed "phase6_namespaces" "$STATE_FILE"
+  fi
+
+  # --- Install Korifi ---
+  if ! component_is_installed "phase6_korifi" "$STATE_FILE"; then
+    log_step "Installing Korifi v0.18.0..."
+    helm install korifi \
+      https://github.com/cloudfoundry/korifi/releases/download/v0.18.0/korifi-0.18.0.tgz \
+      --namespace="korifi" \
+      --set=generateIngressCertificates=true \
+      --set=rootNamespace="cf" \
+      --set=adminUserName="cf-admin" \
+      --set=api.apiServer.url="api.${CF_DOMAIN}" \
+      --set=defaultAppDomainName="${CF_DOMAIN}" \
+      --set=containerRepositoryPrefix="${REGISTRY:-artifactory.cfapps.cool}/docker-local/korifi/" \
+      --set=kpackImageBuilder.builderRepository="${REGISTRY:-artifactory.cfapps.cool}/docker-local/korifi/kpack-builder" \
+      --set=networking.gatewayClass="contour" \
+      --set=networking.gatewayNamespace="korifi-gateway" \
+      --set=experimental.managedServices.enabled=true \
+      --wait --timeout=10m \
+      2>&1 | tail -5
+
+    wait_for_pods "korifi" 180
+    log_success "Korifi installed"
+    mark_component_installed "phase6_korifi" "$STATE_FILE"
+  fi
+
+  mark_phase_complete 6 "$STATE_FILE"
+  echo ""
+  log_success "Phase 6 complete — Cloud Foundry (Korifi)"
+  echo ""
+  echo -e "  ${BOLD}CF API:${NC}     https://api.${CF_DOMAIN}"
+  echo -e "  ${BOLD}App Domain:${NC} *.${CF_DOMAIN}"
+  echo ""
+  echo -e "  ${BOLD}Next steps:${NC}"
+  echo -e "  brew install cloudfoundry/tap/cf-cli@8"
+  echo -e "  cf api https://api.${CF_DOMAIN} --skip-ssl-validation"
+  echo -e "  cf login -u cf-admin"
+  echo -e "  cf create-org dev && cf target -o dev"
+  echo -e "  cf create-space test && cf target -s test"
+  echo -e "  cf push my-app"
+  echo ""
+}
+
+# =============================================================================
+# Status — Show installation status
+# =============================================================================
+cmd_status() {
+  log_phase "Installation Status"
+
+  # --- Phase completion status ---
+  print_section "Phases"
+  local phase_names=(
+    "Foundation (Lima, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager)"
+    "Platform (ArgoCD, Portainer, Garage, Technitium, Velero)"
+    "Monitoring (Loki, Mimir, Tempo, Alloy, KSM, node-exporter, Grafana)"
+    "Services (artifact-keeper, PostgreSQL, Meilisearch)"
+    "GitLab CE"
+    "Cloud Foundry / Korifi [OPTIONAL]"
+  )
+  for i in 1 2 3 4 5 6; do
+    local status_color="$RED"
+    local status_text="Not installed"
+    if phase_is_complete "$i" "$STATE_FILE"; then
+      status_color="$GREEN"
+      local ts
+      ts=$(grep "^PHASE_${i}_TIMESTAMP=" "$STATE_FILE" 2>/dev/null | cut -d= -f2 || echo "unknown")
+      status_text="Complete ($ts)"
+    fi
+    printf "  ${BOLD}Phase %d${NC}  %-60s ${status_color}%s${NC}\n" "$i" "${phase_names[$((i-1))]}" "$status_text"
+  done
+  echo ""
+
+  # --- Component status ---
+  if [[ -f "$STATE_FILE" ]]; then
+    print_section "Components"
+    local components=(
+      "LIMA_K3S:Lima VM + K3s"
+      "PULL_SECRETS:Pull Secrets"
+      "OPENBAO:OpenBao"
+      "ESO:External Secrets Operator"
+      "METALLB:MetalLB"
+      "TRAEFIK:Traefik"
+      "CERTMANAGER:cert-manager"
+      "ARGOCD:ArgoCD"
+      "PORTAINER:Portainer"
+      "GARAGE:Garage"
+      "TECHNITIUM:Technitium DNS"
+      "VELERO:Velero"
+      "LOKI:Loki"
+      "MIMIR:Mimir"
+      "TEMPO:Tempo"
+      "ALLOY:Alloy"
+      "KUBE_STATE_METRICS:kube-state-metrics"
+      "NODE_EXPORTER:node-exporter"
+      "GRAFANA:Grafana"
+      "phase6_qemu:QEMU user-static"
+      "phase6_gateway_api:Gateway API CRDs"
+      "phase6_contour:Contour"
+      "phase6_kpack:kpack"
+      "phase6_servicebinding:Service Binding Runtime"
+      "phase6_namespaces:CF Namespaces"
+      "phase6_korifi:Korifi"
+    )
+    for entry in "${components[@]}"; do
+      local key="${entry%%:*}"
+      local label="${entry#*:}"
+      if component_is_installed "$key" "$STATE_FILE"; then
+        local ts
+        ts=$(grep "^COMPONENT_${key}=" "$STATE_FILE" 2>/dev/null | cut -d= -f2 || echo "")
+        printf "  ${GREEN}[x]${NC} %-30s ${DIM}%s${NC}\n" "$label" "$ts"
+      else
+        printf "  ${DIM}[ ]${NC} %-30s\n" "$label"
+      fi
+    done
+    echo ""
+  fi
+
+  # --- Configuration status ---
+  print_section "Configuration"
+  if [[ -f "$CONFIG_FILE" ]]; then
+    log_success "Configuration file exists at $CONFIG_FILE"
+  else
+    log_warn "No configuration file found. Run: ./install.sh zero"
+  fi
+  echo ""
+
+  # --- Live cluster status ---
+  if [[ -f "${HOME}/.kube/config-k3s" ]]; then
+    export KUBECONFIG="${HOME}/.kube/config-k3s"
+    print_section "Cluster Health"
+    if kubectl get nodes --request-timeout=5s &>/dev/null; then
+      kubectl get nodes -o wide 2>/dev/null | sed 's/^/  /'
+      echo ""
+
+      # Service endpoints
+      if [[ -f "$CONFIG_FILE" ]]; then
+        source "$CONFIG_FILE"
+        print_section "Service Endpoints"
+        local -a svc_names=("Traefik" "ArgoCD" "Portainer" "Grafana" "Technitium DNS")
+        local -a svc_urls=(
+          "https://traefik.${BASE_DOMAIN}"
+          "https://argocd.${BASE_DOMAIN}"
+          "https://portainer.${BASE_DOMAIN}"
+          "https://grafana.${BASE_DOMAIN}"
+          "https://dns.${BASE_DOMAIN}"
+        )
+        for i in "${!svc_names[@]}"; do
+          local code
+          code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 \
+            --max-time 3 -k "${svc_urls[$i]}" 2>/dev/null || echo "000")
+          local color="$RED" label="DOWN"
+          if [[ "$code" =~ ^(200|301|302|303|307|308|401|403)$ ]]; then
+            color="$GREEN"
+            label="UP"
+          fi
+          printf "  ${BOLD}%-20s${NC} %-45s ${color}%s (%s)${NC}\n" \
+            "${svc_names[$i]}" "${svc_urls[$i]}" "$label" "$code"
+        done
+        echo ""
+      fi
+    else
+      log_warn "Cluster not reachable. Is the Lima VM running?"
+      log_info "Start with: ${K8_DIR}/stack.sh start"
+    fi
+  else
+    log_warn "No kubeconfig found. Phase 1 has not been run yet."
+  fi
+}
+
+# =============================================================================
+# Validate — Check all prerequisites
+# =============================================================================
+cmd_validate() {
+  validate_prerequisites
+}
+
+# =============================================================================
+# Interactive full setup — Run zero + all phases
+# =============================================================================
+cmd_full_setup() {
+  cmd_zero
+
+  echo ""
+  if ask_yes_no "Validate prerequisites now?" "y"; then
+    if ! cmd_validate; then
+      log_error "Prerequisites not met. Fix the issues above and re-run."
+      exit 1
+    fi
+  fi
+
+  echo ""
+  if ask_yes_no "Begin Phase 1 (Foundation) installation?" "y"; then
+    install_phase_1
+  fi
+
+  if phase_is_complete 1 "$STATE_FILE"; then
+    if ask_yes_no "Continue with Phase 2 (Platform)?" "y"; then
+      install_phase_2
+    fi
+  fi
+
+  if phase_is_complete 2 "$STATE_FILE"; then
+    if ask_yes_no "Continue with Phase 3 (Monitoring)?" "y"; then
+      install_phase_3
+    fi
+  fi
+
+  if phase_is_complete 3 "$STATE_FILE"; then
+    echo ""
+    log_info "Phases 4 (Services) and 5 (GitLab CE) are placeholders."
+    log_info "Run them when charts are ready: ./install.sh phase 4"
+  fi
+
+  echo ""
+  cmd_status
+}
+
+# =============================================================================
+# Usage
+# =============================================================================
+usage() {
+  cat <<EOF
+
+${BOLD}K8s DevOps Stack — Distribution Installer${NC}
+
+Usage: $(basename "$0") <command> [args]
+
+${BOLD}Commands:${NC}
+  ${CYAN}(none)${NC}          Interactive full setup (zero + all phases)
+  ${CYAN}zero${NC}            Iteration Zero — gather all configuration interactively
+  ${CYAN}phase <N>${NC}       Install a specific phase (1-6):
+                    1: Foundation (Lima, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager)
+                    2: Platform (ArgoCD, Portainer, Garage, Technitium, Velero)
+                    3: Monitoring (Loki, Mimir, Tempo, Alloy, KSM, node-exporter, Grafana)
+                    4: Services (artifact-keeper, PostgreSQL, Meilisearch)
+                    5: GitLab CE
+                    6: Cloud Foundry / Korifi [OPTIONAL] (requires phases 1-3)
+  ${CYAN}status${NC}          Show installation status and service health
+  ${CYAN}validate${NC}        Validate all prerequisites
+
+${BOLD}Examples:${NC}
+  ./install.sh                  # Full interactive setup
+  ./install.sh zero             # Only gather configuration
+  ./install.sh phase 1          # Install foundation layer
+  ./install.sh phase 3          # Install monitoring stack
+  ./install.sh status           # Check what's installed
+  ./install.sh validate         # Check prerequisites
+
+${BOLD}Files:${NC}
+  .install-config    Saved configuration (secrets, gitignored)
+  .install-state     Installation progress tracking (gitignored)
+
+EOF
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+main() {
+  print_banner
+
+  local command="${1:-}"
+  shift || true
+
+  case "$command" in
+    zero)
+      cmd_zero
+      ;;
+    phase)
+      local phase_num="${1:-}"
+      if [[ -z "$phase_num" ]]; then
+        log_error "Usage: ./install.sh phase <1-6>"
+        exit 1
+      fi
+      case "$phase_num" in
+        1) install_phase_1 ;;
+        2) install_phase_2 ;;
+        3) install_phase_3 ;;
+        4) install_phase_4 ;;
+        5) install_phase_5 ;;
+        6) install_phase_6 ;;
+        *)
+          log_error "Unknown phase: $phase_num (valid: 1-6)"
+          exit 1
+          ;;
+      esac
+      ;;
+    status)
+      cmd_status
+      ;;
+    validate)
+      cmd_validate
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    "")
+      cmd_full_setup
+      ;;
+    *)
+      log_error "Unknown command: $command"
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

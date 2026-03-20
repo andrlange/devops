@@ -1,0 +1,20 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@cfapps.cool
+    privateKeySecretRef:
+      name: letsencrypt-prod-key
+    solvers:
+      - dns01:
+          cloudDNS:
+            project: "${GCP_PROJECT_ID}"
+            serviceAccountSecretRef:
+              name: google-cloud-dns-credentials
+              key: credentials.json
+        selector:
+          dnsZones:
+            - "cfapps.cool"

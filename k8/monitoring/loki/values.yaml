@@ -1,0 +1,105 @@
+loki:
+  global:
+    image:
+      registry: artifactory.cfapps.cool
+    imagePullSecrets:
+      - name: artifact-keeper-pull
+
+  loki:
+    image:
+      registry: artifactory.cfapps.cool
+      repository: docker-local/grafana/loki
+      tag: 3.6.7-arm64
+
+    auth_enabled: false
+
+    commonConfig:
+      replication_factor: 1
+
+    schemaConfig:
+      configs:
+        - from: "2024-04-01"
+          store: tsdb
+          object_store: s3
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+
+    storage:
+      type: s3
+      s3:
+        endpoint: http://garage.garage.svc:3900
+        bucketnames: loki-chunks
+        region: garage
+        s3ForcePathStyle: true
+        access_key_id: ${ACCESS_KEY_ID}
+        secret_access_key: ${SECRET_ACCESS_KEY}
+      bucketNames:
+        chunks: loki-chunks
+        ruler: loki-ruler
+        admin: loki-admin
+
+    storage_config:
+      tsdb_shipper:
+        active_index_directory: /var/loki/tsdb-index
+        cache_location: /var/loki/tsdb-cache
+
+  deploymentMode: SingleBinary
+
+  singleBinary:
+    replicas: 1
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 250m
+      limits:
+        memory: 512Mi
+        cpu: 500m
+    extraEnv:
+      - name: ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef:
+            name: loki-s3-credentials
+            key: access_key
+      - name: SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: loki-s3-credentials
+            key: secret_key
+    persistence:
+      enabled: true
+      size: 10Gi
+
+  # Disable components not needed in SingleBinary mode
+  backend:
+    replicas: 0
+  read:
+    replicas: 0
+  write:
+    replicas: 0
+
+  gateway:
+    enabled: false
+
+  chunksCache:
+    enabled: false
+
+  resultsCache:
+    enabled: false
+
+  monitoring:
+    selfMonitoring:
+      enabled: false
+    lokiCanary:
+      enabled: false
+
+  sidecar:
+    image:
+      registry: artifactory.cfapps.cool
+      repository: docker-local/kiwigrid/k8s-sidecar
+    rules:
+      enabled: false
+
+  test:
+    enabled: false

@@ -1,0 +1,11 @@
+apiVersion: v2
+name: velero
+description: Velero backup and restore with Garage S3 backend
+version: 0.1.0
+appVersion: "v1.18.0"
+type: application
+
+dependencies:
+  - name: velero
+    version: "12.0.0"
+    repository: https://vmware-tanzu.github.io/helm-charts

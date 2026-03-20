@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gitlab
+
+resources:
+  - namespace.yaml
+  # ExternalSecrets (admin credentials)
+  - external-secrets.yaml
+  # Persistent volumes
+  - pvc.yaml
+  # GitLab CE omnibus
+  - statefulset.yaml
+  - service.yaml
+  - service-ssh.yaml
+  # Configuration
+  - configmap.yaml
+  # Ingress
+  - ingressroute.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: gitlab
+  app.kubernetes.io/managed-by: kustomize

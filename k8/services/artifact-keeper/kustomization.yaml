@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: artifact-keeper
+
+resources:
+  - namespace.yaml
+  # ExternalSecrets (DB, Meilisearch, S3 credentials)
+  - external-secrets.yaml
+  # PostgreSQL
+  - postgresql/pvc.yaml
+  - postgresql/statefulset.yaml
+  - postgresql/service.yaml
+  # Meilisearch
+  - meilisearch/pvc.yaml
+  - meilisearch/deployment.yaml
+  - meilisearch/service.yaml
+  # artifact-keeper backend
+  - artifact-keeper/configmap.yaml
+  - artifact-keeper/deployment.yaml
+  - artifact-keeper/service.yaml
+  # artifact-keeper web frontend
+  - artifact-keeper/deployment-web.yaml
+  - artifact-keeper/service-web.yaml
+  # Trivy security scanner
+  - trivy/deployment.yaml
+  - trivy/service.yaml
+  # Ingress
+  - ingressroute.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: artifact-keeper
+  app.kubernetes.io/managed-by: kustomize

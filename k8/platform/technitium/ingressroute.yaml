@@ -1,0 +1,15 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: technitium
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`dns.development.cfapps.cool`)
+      kind: Rule
+      services:
+        - name: technitium-ui
+          port: 5380
+  tls:
+ {}

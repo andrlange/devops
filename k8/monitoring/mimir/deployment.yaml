@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mimir
+  namespace: mimir
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mimir
+  template:
+    metadata:
+      labels:
+        app: mimir
+    spec:
+      imagePullSecrets:
+        - name: artifact-keeper-pull
+      containers:
+        - name: mimir
+          image: artifactory.cfapps.cool/docker-local/grafana/mimir:3.0.4-arm64
+          args:
+            - -config.file=/etc/mimir/mimir.yaml
+            - -target=all
+            - -config.expand-env=true
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: grpc
+              containerPort: 9095
+            - name: memberlist
+              containerPort: 7946
+          envFrom:
+            - secretRef:
+                name: mimir-s3-credentials
+          volumeMounts:
+            - name: config
+              mountPath: /etc/mimir
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 500m
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: mimir-config
+        - name: data
+          emptyDir: {}

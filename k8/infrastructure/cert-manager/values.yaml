@@ -1,0 +1,40 @@
+cert-manager:
+  global:
+    imagePullSecrets:
+      - name: artifact-keeper-pull
+
+  installCRDs: true
+
+  image:
+    registry: artifactory.cfapps.cool
+    repository: docker-local/jetstack/cert-manager-controller
+    tag: v1.20.0-arm64
+
+  cainjector:
+    image:
+      registry: artifactory.cfapps.cool
+      repository: docker-local/jetstack/cert-manager-cainjector
+      tag: v1.20.0-arm64
+
+  webhook:
+    image:
+      registry: artifactory.cfapps.cool
+      repository: docker-local/jetstack/cert-manager-webhook
+      tag: v1.20.0-arm64
+
+  acmesolver:
+    image:
+      registry: artifactory.cfapps.cool
+      repository: docker-local/jetstack/cert-manager-acmesolver
+      tag: v1.20.0-arm64
+
+  startupapicheck:
+    enabled: false
+
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 200m

@@ -1,0 +1,30 @@
+metallb:
+  controller:
+    image:
+      repository: artifactory.cfapps.cool/docker-local/metallb/controller
+      tag: "v0.15.3-arm64"
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 256Mi
+        cpu: 200m
+
+  speaker:
+    image:
+      repository: artifactory.cfapps.cool/docker-local/metallb/speaker
+      tag: "v0.15.3-arm64"
+    resources:
+      requests:
+        memory: 64Mi
+        cpu: 50m
+      limits:
+        memory: 128Mi
+        cpu: 100m
+    frr:
+      enabled: false
+
+  global:
+    imagePullSecrets:
+      - name: artifact-keeper-pull

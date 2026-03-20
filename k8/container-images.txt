@@ -1,0 +1,90 @@
+# =============================================================================
+# K8s DevOps Stack — Container Images
+# =============================================================================
+# Alle benötigten Container Images für den K8s Stack.
+# Format: source_image:tag
+# Plattform: linux/arm64 (Apple Silicon)
+#
+# Import in artifact-keeper:
+#   ./import-all-containers.sh
+# oder einzeln:
+#   cd ../artifactory && ./scripts/import-container.sh <image:tag>
+# =============================================================================
+
+# --- Phase 1: Foundation ---------------------------------------------------
+
+# K3s (wird direkt installiert, nicht als Container importiert)
+# rancher/k3s:v1.35.2-k3s1
+
+# OpenBao (Secret Management)
+openbao/openbao:2.5.1
+
+# External Secrets Operator
+ghcr.io/external-secrets/external-secrets:v0.16.1
+
+# MetalLB (Load Balancer)
+quay.io/metallb/controller:v0.15.3
+quay.io/metallb/speaker:v0.15.3
+
+# Traefik (Ingress Controller)
+traefik:v3.6.10
+
+# cert-manager (TLS Zertifikate)
+quay.io/jetstack/cert-manager-controller:v1.20.0
+quay.io/jetstack/cert-manager-cainjector:v1.20.0
+quay.io/jetstack/cert-manager-webhook:v1.20.0
+quay.io/jetstack/cert-manager-acmesolver:v1.20.0
+
+# --- Phase 2: Platform ----------------------------------------------------
+
+# ArgoCD (GitOps)
+quay.io/argoproj/argocd:v3.3.4
+
+# Portainer CE (Management UI)
+portainer/portainer-ce:2.39.0
+
+# Garage (S3-kompatibler Object Storage)
+dxflrs/garage:v2.2.0
+
+# Technitium DNS (Interner DNS + Web-UI)
+technitium/dns-server:14.3.0
+
+# Velero (Backup)
+velero/velero:v1.18.0
+velero/velero-plugin-for-aws:v1.14.0
+
+# --- Phase 3: Monitoring --------------------------------------------------
+
+# Grafana
+grafana/grafana:12.4.1
+
+# Loki (Log-Aggregation)
+grafana/loki:3.6.7
+
+# Mimir (Metriken)
+grafana/mimir:3.0.4
+
+# Tempo (Distributed Tracing)
+grafana/tempo:2.10.3
+
+# Alloy (Log/Metrics Collector, ersetzt Promtail)
+grafana/alloy:v1.14.1
+
+# --- Phase 4: Services ----------------------------------------------------
+
+# PostgreSQL (für artifact-keeper, ggf. GitLab)
+postgres:17.9
+
+# Meilisearch (Volltext-Suche für artifact-keeper)
+getmeili/meilisearch:v1.39.0
+
+# --- Phase 5: GitLab CE ---------------------------------------------------
+
+# GitLab CE
+gitlab/gitlab-ce:18.10.0-ce.0
+
+# GitLab Runner (CI/CD)
+gitlab/gitlab-runner:v17.14.0
+
+# GitLab Runner Helper (used by runner for job containers)
+gitlab/gitlab-runner-helper:x86_64-v17.14.0

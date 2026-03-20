@@ -1,0 +1,3 @@
+# Distribution installer state (contains secrets and local config)
+distribution/.install-config
+distribution/.install-state

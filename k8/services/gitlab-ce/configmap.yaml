@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitlab-config
+  labels:
+    app.kubernetes.io/name: gitlab
+    app.kubernetes.io/component: server
+data:
+  gitlab.rb: |
+    external_url 'https://gitlab.development.cfapps.cool'
+
+    # Nginx: listen on HTTP only, Traefik handles TLS termination
+    nginx['listen_port'] = 80
+    nginx['listen_https'] = false
+    nginx['proxy_set_headers'] = {
+      "X-Forwarded-Proto" => "https",
+      "X-Forwarded-Ssl" => "on"
+    }
+
+    # SSH configuration
+    gitlab_rails['gitlab_shell_ssh_port'] = 22
+
+    # Reduce resource usage for single-node deployment
+    puma['worker_processes'] = 2
+    sidekiq['concurrency'] = 5
+
+    # Disable built-in monitoring (we have our own stack)
+    prometheus_monitoring['enable'] = false
+    node_exporter['enable'] = false
+
+    # Disable container registry (we have artifact-keeper)
+    registry['enable'] = false
+
+    # Use built-in PostgreSQL for simplicity
+    # To switch to external PostgreSQL later, uncomment and configure:
+    # postgresql['enable'] = false
+    # gitlab_rails['db_adapter'] = 'postgresql'
+    # gitlab_rails['db_host'] = 'postgres.gitlab.svc.cluster.local'
+    # gitlab_rails['db_port'] = 5432
+    # gitlab_rails['db_database'] = 'gitlabhq_production'
+    # gitlab_rails['db_username'] = 'gitlab'
+    # gitlab_rails['db_password'] = ENV['DB_PASSWORD']

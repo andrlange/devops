@@ -1,0 +1,6 @@
+.idea/
+.env.local
+k8/.env.local
+/gcp-dns-credentials.json
+k8/distribution/.install-config
+k8/distribution/.install-state

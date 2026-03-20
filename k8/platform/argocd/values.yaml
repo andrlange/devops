@@ -1,0 +1,74 @@
+argo-cd:
+  global:
+    domain: argocd.development.cfapps.cool
+    image:
+      repository: artifactory.cfapps.cool/docker-local/argoproj/argocd
+      tag: v3.3.4-arm64
+    imagePullSecrets:
+      - name: artifact-keeper-pull
+
+  configs:
+    params:
+      server.insecure: "true"
+
+  server:
+    service:
+      type: ClusterIP
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 256Mi
+        cpu: 250m
+
+  controller:
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 250m
+      limits:
+        memory: 512Mi
+        cpu: 500m
+
+  repoServer:
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 256Mi
+        cpu: 250m
+
+  applicationSet:
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 256Mi
+        cpu: 250m
+
+  notifications:
+    resources:
+      requests:
+        memory: 64Mi
+        cpu: 50m
+      limits:
+        memory: 128Mi
+        cpu: 100m
+
+  redis:
+    image:
+      repository: artifactory.cfapps.cool/docker-local/library/redis
+      tag: 8.2.3-alpine-arm64
+    resources:
+      requests:
+        memory: 64Mi
+        cpu: 50m
+      limits:
+        memory: 128Mi
+        cpu: 100m
+
+  dex:
+    enabled: false

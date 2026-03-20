@@ -1,0 +1,292 @@
+alloy:
+  global:
+    image:
+      registry: artifactory.cfapps.cool
+    imagePullSecrets:
+      - name: artifact-keeper-pull
+
+  image:
+    registry: artifactory.cfapps.cool
+    repository: docker-local/grafana/alloy
+    tag: v1.14.1-arm64
+
+  configReloader:
+    image:
+      registry: artifactory.cfapps.cool
+      repository: docker-local/prometheus-operator/prometheus-config-reloader
+
+  alloy:
+    clustering:
+      enabled: false
+
+    configMap:
+      create: true
+      content: |
+        // ============================================================
+        // Log Collection
+        // ============================================================
+
+        // Discover all Kubernetes pods
+        discovery.kubernetes "pods" {
+          role = "pod"
+        }
+
+        // Relabel discovered targets for log collection
+        discovery.relabel "pods" {
+          targets = discovery.kubernetes.pods.targets
+
+          // Set the __path__ label to the log file path
+          rule {
+            source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+            separator     = "/"
+            target_label  = "__path__"
+            replacement   = "/var/log/pods/*$1/$2/*.log"
+          }
+
+          // Keep the namespace label
+          rule {
+            source_labels = ["__meta_kubernetes_namespace"]
+            target_label  = "namespace"
+          }
+
+          // Keep the pod name label
+          rule {
+            source_labels = ["__meta_kubernetes_pod_name"]
+            target_label  = "pod"
+          }
+
+          // Keep the container name label
+          rule {
+            source_labels = ["__meta_kubernetes_pod_container_name"]
+            target_label  = "container"
+          }
+
+          // Keep the node name label
+          rule {
+            source_labels = ["__meta_kubernetes_pod_node_name"]
+            target_label  = "node"
+          }
+
+          // Keep relevant app labels
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_app"]
+            target_label  = "app"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+            target_label  = "app"
+          }
+
+          // Drop pods with annotation to opt out of log collection
+          rule {
+            source_labels = ["__meta_kubernetes_pod_annotation_alloy_grafana_com_logs_exclude"]
+            regex         = "true"
+            action        = "drop"
+          }
+        }
+
+        // Collect log files from discovered pods
+        loki.source.file "pods" {
+          targets    = discovery.relabel.pods.output
+          forward_to = [loki.process.pods.receiver]
+        }
+
+        // Process logs: detect log format and parse
+        loki.process "pods" {
+          // Detect and parse CRI log format
+          stage.cri {}
+
+          // Add a source label
+          stage.static_labels {
+            values = {
+              source = "kubernetes",
+            }
+          }
+
+          forward_to = [loki.write.default.receiver]
+        }
+
+        // Send logs to Loki
+        loki.write "default" {
+          endpoint {
+            url = "http://loki.loki.svc:3100/loki/api/v1/push"
+          }
+        }
+
+        // ============================================================
+        // Metrics Collection
+        // ============================================================
+
+        // Discover Kubernetes nodes
+        discovery.kubernetes "nodes" {
+          role = "node"
+        }
+
+        // Relabel node targets to use the kubelet HTTPS endpoint
+        discovery.relabel "nodes" {
+          targets = discovery.kubernetes.nodes.targets
+
+          // Set the address to the kubelet HTTPS port
+          rule {
+            target_label = "__address__"
+            replacement  = "kubernetes.default.svc:443"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_node_name"]
+            regex         = "(.+)"
+            target_label  = "__metrics_path__"
+            replacement   = "/api/v1/nodes/$1/proxy/metrics"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_node_name"]
+            target_label  = "node"
+          }
+        }
+
+        // Relabel node targets for cadvisor metrics
+        discovery.relabel "cadvisor" {
+          targets = discovery.kubernetes.nodes.targets
+
+          rule {
+            target_label = "__address__"
+            replacement  = "kubernetes.default.svc:443"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_node_name"]
+            regex         = "(.+)"
+            target_label  = "__metrics_path__"
+            replacement   = "/api/v1/nodes/$1/proxy/metrics/cadvisor"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_node_name"]
+            target_label  = "node"
+          }
+        }
+
+        // Scrape kubelet metrics via API server proxy
+        prometheus.scrape "kubelet" {
+          targets         = discovery.relabel.nodes.output
+          scheme          = "https"
+          scrape_interval = "60s"
+          tls_config {
+            ca_file              = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+            insecure_skip_verify = false
+          }
+          bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+          forward_to        = [prometheus.remote_write.mimir.receiver]
+        }
+
+        // Scrape cadvisor metrics via API server proxy
+        prometheus.scrape "cadvisor" {
+          targets         = discovery.relabel.cadvisor.output
+          scheme          = "https"
+          scrape_interval = "60s"
+          tls_config {
+            ca_file              = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+            insecure_skip_verify = false
+          }
+          bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+          forward_to        = [prometheus.remote_write.mimir.receiver]
+        }
+
+        // Discover Kubernetes services for kube-state-metrics
+        discovery.kubernetes "services" {
+          role = "service"
+        }
+
+        // Relabel to find kube-state-metrics service
+        discovery.relabel "kube_state_metrics" {
+          targets = discovery.kubernetes.services.targets
+
+          // Only keep the kube-state-metrics service
+          rule {
+            source_labels = ["__meta_kubernetes_service_label_app_kubernetes_io_name"]
+            regex         = "kube-state-metrics"
+            action        = "keep"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_namespace"]
+            target_label  = "namespace"
+          }
+        }
+
+        // Scrape kube-state-metrics (if available)
+        prometheus.scrape "kube_state_metrics" {
+          targets         = discovery.relabel.kube_state_metrics.output
+          scrape_interval = "60s"
+          forward_to      = [prometheus.remote_write.mimir.receiver]
+        }
+
+        // Discover Kubernetes endpoints for node-exporter
+        discovery.kubernetes "endpoints" {
+          role = "endpoints"
+        }
+
+        // Relabel to find node-exporter endpoints
+        discovery.relabel "node_exporter" {
+          targets = discovery.kubernetes.endpoints.targets
+
+          // Only keep the node-exporter service
+          rule {
+            source_labels = ["__meta_kubernetes_service_label_app_kubernetes_io_name"]
+            regex         = "(node-exporter|prometheus-node-exporter)"
+            action        = "keep"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_endpoint_node_name"]
+            target_label  = "node"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_namespace"]
+            target_label  = "namespace"
+          }
+        }
+
+        // Scrape node-exporter metrics (if available)
+        prometheus.scrape "node_exporter" {
+          targets         = discovery.relabel.node_exporter.output
+          scrape_interval = "60s"
+          forward_to      = [prometheus.remote_write.mimir.receiver]
+        }
+
+        // Remote write metrics to Mimir
+        prometheus.remote_write "mimir" {
+          endpoint {
+            url = "http://mimir.mimir.svc:8080/api/v1/push"
+          }
+        }
+
+  controller:
+    type: daemonset
+
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+  # Mount host log directories for pod log collection
+  mounts:
+    varlog: true
+
+  serviceAccount:
+    create: true
+
+  rbac:
+    create: true
+
+  # Extra RBAC rules for metrics scraping (nodes/proxy for kubelet + cadvisor)
+  extraClusterPolicies:
+    - apiGroups: [""]
+      resources: ["nodes", "nodes/proxy", "nodes/metrics"]
+      verbs: ["get", "list", "watch"]

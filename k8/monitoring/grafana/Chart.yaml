@@ -1,0 +1,11 @@
+apiVersion: v2
+name: grafana
+description: Grafana observability dashboards with Loki, Mimir, and Tempo datasources
+version: 0.1.0
+appVersion: "12.4.1"
+type: application
+
+dependencies:
+  - name: grafana
+    version: "10.5.15"
+    repository: https://grafana.github.io/helm-charts

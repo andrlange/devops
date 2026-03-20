@@ -1,0 +1,27 @@
+portainer:
+  image:
+    repository: artifactory.cfapps.cool/docker-local/portainer/portainer-ce
+    tag: "2.39.1-arm64"
+    pullPolicy: IfNotPresent
+
+  imagePullSecrets:
+    - name: artifact-keeper-pull
+
+  service:
+    type: ClusterIP
+
+  tls:
+    force: false
+
+  persistence:
+    enabled: true
+    storageClass: local-path
+    size: 1Gi
+
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 250m

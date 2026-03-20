@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: artifact-keeper-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: artifact-keeper
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: artifact-keeper
+        app.kubernetes.io/component: web
+        app.kubernetes.io/part-of: artifact-keeper
+    spec:
+      imagePullSecrets:
+        - name: artifact-keeper-pull
+      containers:
+        - name: web
+          image: artifactory.cfapps.cool/docker-local/andrlange/artifact-keeper-web:v1.1.0-rc.8-patched-arm64
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: NEXT_PUBLIC_API_URL
+              value: "https://artifacts.development.cfapps.cool/api"
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 256Mi
+              cpu: 250m
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30

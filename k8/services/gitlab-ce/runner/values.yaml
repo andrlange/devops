@@ -1,0 +1,37 @@
+gitlab-runner:
+  image:
+    registry: artifactory.cfapps.cool
+    image: docker-local/gitlab-org/gitlab-runner
+    tag: alpine-v18.10.0-arm64
+
+  imagePullSecrets:
+    - name: artifact-keeper-pull
+
+  gitlabUrl: https://gitlab.development.cfapps.cool/
+
+  rbac:
+    create: true
+    clusterWideAccess: true
+
+  runners:
+    secret: gitlab-runner-secret
+    config: |
+      [[runners]]
+        [runners.kubernetes]
+          namespace = "gitlab-runner-jobs"
+          image = "alpine:3.21"
+          privileged = false
+          pull_policy = ["if-not-present"]
+          [runners.kubernetes.pod_security_context]
+            run_as_non_root = true
+            run_as_user = 1000
+          [runners.kubernetes.pod_labels]
+            "app.kubernetes.io/managed-by" = "gitlab-runner"
+
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 250m

@@ -1,0 +1,40 @@
+velero:
+  image:
+    repository: artifactory.cfapps.cool/docker-local/velero/velero
+    tag: v1.18.0-arm64
+    imagePullSecrets:
+      - artifact-keeper-pull
+
+  initContainers:
+    - name: velero-plugin-for-aws
+      image: artifactory.cfapps.cool/docker-local/velero/velero-plugin-for-aws:v1.14.0-arm64
+      imagePullPolicy: IfNotPresent
+      volumeMounts:
+        - mountPath: /target
+          name: plugins
+
+  credentials:
+    existingSecret: velero-s3-credentials
+
+  snapshotsEnabled: false
+
+  configuration:
+    defaultVolumesToFsBackup: true
+    backupStorageLocation:
+      - name: garage
+        provider: aws
+        bucket: velero-backups
+        config:
+          region: garage
+          s3ForcePathStyle: "true"
+          s3Url: http://garage.garage.svc:3900
+
+  deployNodeAgent: true
+
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m

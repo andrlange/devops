@@ -1,0 +1,45 @@
+external-secrets:
+  installCRDs: true
+
+  image:
+    repository: artifactory.cfapps.cool/docker-local/external-secrets/external-secrets
+    tag: v0.16.1-arm64
+
+  imagePullSecrets:
+    - name: artifact-keeper-pull
+
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 200m
+
+  webhook:
+    image:
+      repository: artifactory.cfapps.cool/docker-local/external-secrets/external-secrets
+      tag: v0.16.1-arm64
+    imagePullSecrets:
+      - name: artifact-keeper-pull
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 256Mi
+        cpu: 200m
+
+  certController:
+    image:
+      repository: artifactory.cfapps.cool/docker-local/external-secrets/external-secrets
+      tag: v0.16.1-arm64
+    imagePullSecrets:
+      - name: artifact-keeper-pull
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 256Mi
+        cpu: 200m

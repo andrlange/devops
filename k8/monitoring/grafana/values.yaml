@@ -1,0 +1,80 @@
+grafana:
+  image:
+    registry: artifactory.cfapps.cool
+    repository: docker-local/grafana/grafana
+    tag: "12.4.1-arm64"
+    pullPolicy: IfNotPresent
+
+  imagePullSecrets:
+    - name: artifact-keeper-pull
+
+  admin:
+    existingSecret: grafana-admin-credentials
+    userKey: username
+    passwordKey: password
+
+  initChownData:
+    enabled: false
+
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 2Gi
+
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Loki
+          type: loki
+          url: http://loki.loki.svc:3100
+          access: proxy
+          isDefault: false
+          editable: true
+
+        - name: Mimir
+          type: prometheus
+          url: http://mimir.mimir.svc:8080/prometheus
+          access: proxy
+          isDefault: true
+          editable: true
+
+        - name: Tempo
+          type: tempo
+          url: http://tempo.tempo.svc:3100
+          access: proxy
+          isDefault: false
+          editable: true
+          jsonData:
+            tracesToLogsV2:
+              datasourceUid: loki
+            nodeGraph:
+              enabled: true
+
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: kubernetes
+          orgId: 1
+          folder: Kubernetes
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/kubernetes
+
+  dashboardsConfigMaps:
+    kubernetes: grafana-dashboards-kubernetes
+
+  service:
+    type: ClusterIP
+    port: 80
+
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m

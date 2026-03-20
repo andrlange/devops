@@ -1,0 +1,40 @@
+traefik:
+  image:
+    registry: artifactory.cfapps.cool
+    repository: docker-local/traefik
+    tag: "v3.6.10-arm64"
+
+  deployment:
+    imagePullSecrets:
+      - name: artifact-keeper-pull
+
+  service:
+    type: LoadBalancer
+
+  ingressRoute:
+    dashboard:
+      enabled: true
+      matchRule: Host(`traefik.development.cfapps.cool`)
+      entryPoints:
+        - websecure
+
+  providers:
+    kubernetesCRD:
+      enabled: true
+      allowCrossNamespace: true
+    kubernetesIngress:
+      enabled: true
+
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 250m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+  additionalArguments:
+    - "--api.dashboard=true"
+    - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+    - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+    - "--entrypoints.websecure.http.tls"

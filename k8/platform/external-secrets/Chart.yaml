@@ -1,0 +1,11 @@
+apiVersion: v2
+name: external-secrets
+description: External Secrets Operator - syncs secrets from OpenBao into Kubernetes
+version: 0.1.0
+appVersion: "v0.16.1"
+type: application
+
+dependencies:
+  - name: external-secrets
+    version: "0.16.1"
+    repository: https://charts.external-secrets.io

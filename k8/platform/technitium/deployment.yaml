@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: technitium
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: technitium
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: technitium
+    spec:
+      imagePullSecrets:
+        - name: artifact-keeper-pull
+      containers:
+        - name: dns-server
+          image: artifactory.cfapps.cool/docker-local/technitium/dns-server:14.3.0-arm64
+          env:
+            - name: DNS_SERVER_DOMAIN
+              value: dns.development.cfapps.cool
+          ports:
+            - name: web-ui
+              containerPort: 5380
+              protocol: TCP
+            - name: dns-tcp
+              containerPort: 53
+              protocol: TCP
+            - name: dns-udp
+              containerPort: 53
+              protocol: UDP
+          volumeMounts:
+            - name: data
+              mountPath: /etc/dns
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 256Mi
+              cpu: 200m
+          livenessProbe:
+            httpGet:
+              path: /
+              port: web-ui
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: web-ui
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: technitium-data
