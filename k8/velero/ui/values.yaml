@@ -1,0 +1,32 @@
+image:
+  repository: artifactory.cfapps.cool/docker-local/velero-ui
+  tag: "0.10.1"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: artifact-keeper-pull
+
+configuration:
+  general:
+    secretPassPhrase:
+      value: "velero-ui-jwt-secret-change-me"
+    veleroNamespace: "velero"
+
+rbac:
+  create: true
+  clusterAdministrator: true
+
+env:
+  - name: BASIC_AUTH_ENABLED
+    value: "true"
+  - name: BASIC_AUTH_USER
+    value: "admin"
+  - name: BASIC_AUTH_PASSWORD
+    value: "velero-admin-2026"
+
+resources:
+  requests:
+    memory: 128Mi
+    cpu: 50m
+  limits:
+    memory: 256Mi

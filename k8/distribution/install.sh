@@ -723,6 +723,42 @@ install_phase_2() {
     log_info "Velero already installed, skipping"
   fi
 
+  # --- 2.6 Velero UI ---
+  if ! component_is_installed "VELERO_UI" "$STATE_FILE"; then
+    log_step "2.6 — Velero UI"
+
+    helm repo add otwld https://otwld.github.io/helm-charts 2>/dev/null || true
+    if [[ -f "${K8_DIR}/velero/ui/values.yaml" ]]; then
+      helm install velero-ui otwld/velero-ui \
+        -n velero \
+        -f "${K8_DIR}/velero/ui/values.yaml" \
+        2>&1 | tail -1
+    else
+      helm install velero-ui otwld/velero-ui \
+        -n velero \
+        --set image.repository="artifactory.cfapps.cool/docker-local/velero-ui" \
+        --set image.tag="0.10.1" \
+        --set "env[0].name=BASIC_AUTH_ENABLED" \
+        --set "env[0].value=true" \
+        --set "env[1].name=BASIC_AUTH_USER" \
+        --set "env[1].value=admin" \
+        --set "env[2].name=BASIC_AUTH_PASSWORD" \
+        --set "env[2].value=velero-admin-2026" \
+        2>&1 | tail -1
+    fi
+    wait_for_pods "velero" 60
+
+    # Apply IngressRoute
+    if [[ -f "${K8_DIR}/velero/ui/ingressroute.yaml" ]]; then
+      apply_manifest "${K8_DIR}/velero/ui/ingressroute.yaml"
+    fi
+
+    log_success "Velero UI installed at https://backup.${PLATFORM_DOMAIN}"
+    mark_component_installed "VELERO_UI" "$STATE_FILE"
+  else
+    log_info "Velero UI already installed, skipping"
+  fi
+
   mark_phase_complete 2 "$STATE_FILE"
   log_success "Phase 2 — Platform complete"
   echo ""

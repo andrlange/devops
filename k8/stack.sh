@@ -543,10 +543,12 @@ get_endpoints() {
         "S3 (Garage)|https://s3.${PLATFORM_DOMAIN}"
         "S3 Manager|https://s3-manager.${PLATFORM_DOMAIN}"
         "Technitium DNS|https://dns.${PLATFORM_DOMAIN}"
+        "Velero Backup|https://backup.${PLATFORM_DOMAIN}"
         # Phase 3 - Monitoring
         "Grafana|https://grafana.${PLATFORM_DOMAIN}"
         # Phase 4 - Services
         "artifact-keeper|https://artifacts.${PLATFORM_DOMAIN}"
+        "OpenBao|https://vault.${PLATFORM_DOMAIN}"
     )
 
     # Phase 5 - GitLab (only if namespace exists)

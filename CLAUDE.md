@@ -6,12 +6,12 @@ Kubernetes-based DevOps environment on Apple Silicon Macs (M4+, 64GB+). Single-n
 
 ## Current State
 
-- **Phase 1 (Foundation):** Deployed — Lima VM, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager
-- **Phase 2 (Platform):** Deployed — ArgoCD, Portainer, Garage, Technitium, Velero
+- **Phase 1 (Foundation):** Deployed — Lima VM, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager, Kubernetes Reflector
+- **Phase 2 (Platform):** Deployed — ArgoCD, Portainer, Garage, Technitium, Velero, Velero UI
 - **Phase 3 (Monitoring):** Deployed — Grafana, Loki, Mimir, Tempo, Alloy, kube-state-metrics, node-exporter
 - **Phase 4 (Services):** Deployed — artifact-keeper (Backend + Web UI v1.1.0-rc.8-patched) + PostgreSQL 17.9 + Meilisearch v1.39.0 + Trivy Scanner v0.69.3
 - **Phase 5 (GitLab CE):** Deployed — GitLab CE 18.10.0 + GitLab Runner (automated registration via distribution/install.sh)
-- **Phase 6 (Apps):** Pending
+- **Phase 6 (Apps):** Deployed — Korifi v0.18.0 (CF on K8s) + kpack ARM64 + Contour Gateway
 
 ## Tech Stack
 
@@ -24,7 +24,7 @@ Kubernetes-based DevOps environment on Apple Silicon Macs (M4+, 64GB+). Single-n
 - **Monitoring:** Grafana + Loki + Mimir + Tempo + Alloy + kube-state-metrics + node-exporter (backends → Garage S3)
 - **DNS:** Technitium DNS (internal zones + Web-UI)
 - **Management UI:** Portainer
-- **Backup:** Velero → Garage S3
+- **Backup:** Velero → Garage S3, Velero UI (otwld/velero-ui)
 - **Artifact Registry:** artifact-keeper (PostgreSQL + Meilisearch + Garage S3)
 - **Git Hosting:** GitLab CE 18.10.0 + GitLab Runner (CI/CD)
 - **Namespaces:** gitlab, gitlab-runner, gitlab-runner-jobs
