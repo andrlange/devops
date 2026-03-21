@@ -168,6 +168,16 @@ cmd_start() {
         wait_for_namespace "$ns" 30 || true
     done
 
+    # 6b. Ensure Velero BSL default is set
+    if kube get namespace velero &>/dev/null; then
+        local bsl_name
+        bsl_name=$(kubectl get backupstoragelocation -n velero --no-headers -o custom-columns=":metadata.name" 2>/dev/null | head -1)
+        if [ -n "$bsl_name" ]; then
+            kubectl patch backupstoragelocation "$bsl_name" -n velero \
+                --type='json' -p='[{"op":"add","path":"/spec/default","value":true}]' 2>/dev/null || true
+        fi
+    fi
+
     # 7. Wait for monitoring pods
     local monitoring_namespaces=(
         loki

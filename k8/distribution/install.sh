@@ -713,7 +713,17 @@ install_phase_2() {
     if [[ -d "${K8_DIR}/velero" ]]; then
       helm_install_if_needed "velero" "${K8_DIR}/velero" "velero"
       wait_for_pods "velero" 120
-      log_success "Velero installed"
+
+      # Ensure BackupStorageLocation is set as default
+      local bsl_name
+      bsl_name=$(kubectl get backupstoragelocation -n velero --no-headers -o custom-columns=":metadata.name" 2>/dev/null | head -1)
+      if [ -n "$bsl_name" ]; then
+        kubectl patch backupstoragelocation "$bsl_name" -n velero \
+          --type='json' -p='[{"op":"add","path":"/spec/default","value":true}]' 2>/dev/null || true
+        log_success "Velero installed (BSL '${bsl_name}' set as default)"
+      else
+        log_success "Velero installed"
+      fi
     else
       log_warn "Velero chart not found at ${K8_DIR}/velero — skipping"
     fi
