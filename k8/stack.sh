@@ -313,6 +313,28 @@ cmd_status() {
     kubectl top nodes 2>/dev/null | sed 's/^/  /' || info "  metrics-server not available"
     echo
 
+    # 3b. VM disk usage
+    printf "${BOLD}VM Disk${NC}\n"
+    local disk_info
+    disk_info=$(limactl shell "$LIMA_VM_NAME" df -h / 2>/dev/null | tail -1)
+    if [[ -n "$disk_info" ]]; then
+        local disk_size disk_used disk_avail disk_pct
+        disk_size=$(echo "$disk_info" | awk '{print $2}')
+        disk_used=$(echo "$disk_info" | awk '{print $3}')
+        disk_avail=$(echo "$disk_info" | awk '{print $4}')
+        disk_pct=$(echo "$disk_info" | awk '{print $5}')
+        local pct_num=${disk_pct%%%}
+        local color="$GREEN"
+        [[ $pct_num -ge 80 ]] && color="$YELLOW"
+        [[ $pct_num -ge 90 ]] && color="$RED"
+        row "Total"     "$disk_size"
+        row "Used"      "$disk_used ($disk_pct)" "$color"
+        row "Available" "$disk_avail"
+    else
+        warn "  Could not read VM disk usage"
+    fi
+    echo
+
     # 4. Namespace overview
     printf "${BOLD}Namespaces${NC}\n"
     printf "  ${BOLD}%-24s %-8s %-8s %-8s${NC}\n" "NAMESPACE" "TOTAL" "READY" "NOT-READY"
@@ -706,6 +728,83 @@ for c in certs:
 }
 
 # ---------------------------------------------------------------------------
+# Extend Disk
+# ---------------------------------------------------------------------------
+cmd_extenddisk() {
+    local new_size="${1:-}"
+    if [[ -z "$new_size" ]]; then
+        err "Usage: $(basename "$0") extenddisk <size-in-gb>"
+        err "Example: $(basename "$0") extenddisk 300"
+        exit 1
+    fi
+
+    # Validate: must be a number
+    if ! [[ "$new_size" =~ ^[0-9]+$ ]]; then
+        err "Size must be a number (in GB), got: ${new_size}"
+        exit 1
+    fi
+
+    local lima_yaml="${HOME}/.lima/${LIMA_VM_NAME}/lima.yaml"
+    if [[ ! -f "$lima_yaml" ]]; then
+        err "Lima config not found: ${lima_yaml}"
+        exit 1
+    fi
+
+    # Get current disk size
+    local current_size
+    current_size=$(grep '^disk:' "$lima_yaml" | head -1 | sed 's/disk: *//;s/GiB//')
+    if [[ -z "$current_size" ]]; then
+        err "Could not determine current disk size from ${lima_yaml}"
+        exit 1
+    fi
+
+    # Validate: new size must be larger
+    if [[ "$new_size" -le "$current_size" ]]; then
+        err "New size (${new_size}GB) must be larger than current size (${current_size}GB)"
+        exit 1
+    fi
+
+    header "Extending VM Disk"
+    info "Current size: ${current_size}GB"
+    info "New size:     ${new_size}GB"
+    echo
+
+    # Check if VM is running
+    local needs_restart=false
+    if vm_is_running; then
+        warn "VM must be stopped to resize disk"
+        info "Stopping VM..."
+        limactl stop "$LIMA_VM_NAME" 2>&1 | tail -1
+        needs_restart=true
+    fi
+
+    # Update lima.yaml
+    sed -i '' "s/^disk: .*GiB/disk: ${new_size}GiB/" "$lima_yaml"
+    ok "Updated ${lima_yaml}: disk: ${new_size}GiB"
+
+    # Start VM (Lima auto-resizes disk on boot)
+    info "Starting VM (disk will be resized automatically)..."
+    limactl start "$LIMA_VM_NAME" 2>&1 | tail -3
+    ok "VM started with ${new_size}GB disk"
+
+    # Verify
+    echo
+    local disk_info
+    disk_info=$(limactl shell "$LIMA_VM_NAME" df -h / 2>/dev/null | tail -1)
+    local disk_total
+    disk_total=$(echo "$disk_info" | awk '{print $2}')
+    ok "Verified disk size: ${disk_total}"
+
+    # Resize filesystem if needed (usually automatic)
+    limactl shell "$LIMA_VM_NAME" sudo resize2fs /dev/vda1 2>/dev/null || true
+
+    if [[ "$needs_restart" == "true" ]]; then
+        echo
+        info "Run './stack.sh start' to bring the full stack back up"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
 usage() {
@@ -715,12 +814,13 @@ ${BOLD}K8s DevOps Stack Manager${NC}
 Usage: $(basename "$0") <command> [options]
 
 Commands:
-  start       Start the Lima VM and K3s cluster
-  stop        Stop the Lima VM (--backup to backup first)
-  status      Show cluster and service status
-  restart     Stop then start the stack
-  backup      Create a Velero backup
-  renewcerts  Force renewal of all TLS certificates
+  start        Start the Lima VM and K3s cluster
+  stop         Stop the Lima VM (--backup to backup first)
+  status       Show cluster and service status
+  restart      Stop then start the stack
+  backup       Create a Velero backup
+  renewcerts   Force renewal of all TLS certificates
+  extenddisk   Extend VM disk size (e.g. extenddisk 300)
 
 Options:
   --backup    (stop only) Run a Velero backup before stopping
@@ -729,6 +829,7 @@ Examples:
   $(basename "$0") start
   $(basename "$0") stop --backup
   $(basename "$0") status
+  $(basename "$0") extenddisk 300
 EOF
 }
 
@@ -749,6 +850,7 @@ main() {
         restart)    cmd_restart "$@" ;;
         backup)     cmd_backup ;;
         renewcerts) cmd_renewcerts ;;
+        extenddisk) cmd_extenddisk "$@" ;;
         -h|--help|help)
             usage ;;
         "")
