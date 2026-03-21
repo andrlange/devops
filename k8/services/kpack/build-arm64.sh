@@ -51,20 +51,32 @@ done
 echo ""
 
 # Step 2: Build OCI images with crane and push
+# controller/webhook use /app, build helpers use /cnb/process/<name>
+declare -A BINARY_PATHS
+BINARY_PATHS[controller]="/app"
+BINARY_PATHS[webhook]="/app"
+BINARY_PATHS[build-init]="/cnb/process/build-init"
+BINARY_PATHS[build-waiter]="/cnb/process/build-waiter"
+BINARY_PATHS[rebase]="/cnb/process/rebase"
+BINARY_PATHS[completion]="/cnb/process/completion"
+
 echo "--- Building and pushing OCI images ---"
 for binary in "${BINARIES[@]}"; do
   IMAGE="${REGISTRY}/kpack/${binary}:${TAG}"
-  echo -n "  ${binary} -> ${IMAGE}... "
+  TARGET="${BINARY_PATHS[$binary]}"
+  echo -n "  ${binary} -> ${IMAGE} (${TARGET})... "
 
-  # Create layer tarball with binary as /app
+  # Create layer tarball with binary at expected path
   TMPDIR_BP=$(mktemp -d)
-  cp "${BUILD_DIR}/${binary}" "${TMPDIR_BP}/app"
+  TARGET_DIR=$(dirname "${TARGET}")
+  mkdir -p "${TMPDIR_BP}/${TARGET_DIR#/}"
+  cp "${BUILD_DIR}/${binary}" "${TMPDIR_BP}/${TARGET_DIR#/}/$(basename "${TARGET}")"
   LAYER=$(mktemp)
-  (cd "${TMPDIR_BP}" && tar cf "${LAYER}" app)
+  (cd "${TMPDIR_BP}" && tar cf "${LAYER}" .)
 
   # Append layer to distroless base and set entrypoint
   crane append --base "${BASE_IMAGE}" --new_tag "${IMAGE}" --new_layer "${LAYER}" --platform linux/arm64 >/dev/null 2>&1
-  crane mutate "${IMAGE}" --entrypoint "/app" --tag "${IMAGE}" >/dev/null 2>&1
+  crane mutate "${IMAGE}" --entrypoint "${TARGET}" --tag "${IMAGE}" >/dev/null 2>&1
 
   rm -rf "${TMPDIR_BP}" "${LAYER}"
   echo "done"
