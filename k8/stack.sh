@@ -152,6 +152,9 @@ cmd_start() {
         wait_for_namespace "$ns" 60 || true
     done
 
+    # 5b. Auto-unseal OpenBao (required before ESO can sync secrets)
+    auto_unseal_openbao
+
     # 6. Wait for platform pods
     info "Waiting for platform pods..."
     local platform_namespaces=(
@@ -425,6 +428,64 @@ YAML
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+auto_unseal_openbao() {
+    if ! kube get namespace openbao &>/dev/null; then
+        return
+    fi
+    local unseal_script="${SCRIPT_DIR}/unseal.sh"
+    if [[ ! -f "$unseal_script" ]]; then
+        return
+    fi
+
+    # Wait for OpenBao pod to be running
+    local pod
+    for ((i=1; i<=12; i++)); do
+        pod=$(kubectl get pods -n openbao -l app.kubernetes.io/name=openbao \
+            --no-headers -o custom-columns=":metadata.name" 2>/dev/null | head -1)
+        if [[ -n "$pod" ]]; then
+            local phase
+            phase=$(kubectl get pod -n openbao "$pod" -o jsonpath='{.status.phase}' 2>/dev/null)
+            [[ "$phase" == "Running" ]] && break
+        fi
+        sleep 5
+    done
+
+    if [[ -z "$pod" ]]; then
+        warn "OpenBao pod not found — skipping auto-unseal"
+        return
+    fi
+
+    # Check if already unsealed
+    local sealed
+    sealed=$(kubectl exec -n openbao "$pod" -- bao status -format=json 2>/dev/null \
+        | jq -r '.sealed' 2>/dev/null || echo "unknown")
+
+    if [[ "$sealed" == "false" ]]; then
+        ok "OpenBao is already unsealed"
+        return
+    fi
+
+    info "Auto-unsealing OpenBao..."
+    # Extract unseal keys from unseal.sh (lines with 'bao operator unseal')
+    local keys
+    keys=$(grep 'bao operator unseal' "$unseal_script" | sed 's/.*unseal //' | tr -d '\r')
+    while IFS= read -r key; do
+        [[ -z "$key" ]] && continue
+        kubectl exec -n openbao "$pod" -- bao operator unseal "$key" &>/dev/null || true
+    done <<< "$keys"
+
+    # Verify
+    sealed=$(kubectl exec -n openbao "$pod" -- bao status -format=json 2>/dev/null \
+        | jq -r '.sealed' 2>/dev/null || echo "unknown")
+    if [[ "$sealed" == "false" ]]; then
+        ok "OpenBao auto-unsealed successfully"
+        # Give ESO a moment to sync secrets
+        sleep 5
+    else
+        warn "OpenBao auto-unseal failed — manual unseal required"
+    fi
+}
 
 check_openbao_seal() {
     if ! kube get namespace openbao &>/dev/null; then

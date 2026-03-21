@@ -1,0 +1,15 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: openbao
+  namespace: openbao
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`vault.development.cfapps.cool`)
+      kind: Rule
+      services:
+        - name: openbao
+          port: 8200
+  tls: {}
