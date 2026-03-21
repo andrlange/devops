@@ -124,13 +124,19 @@ func (p *PostgreSQL) GetCredentials(ctx context.Context, client *k8sclient.Clien
 		dbname = "app"
 	}
 
+	// Use FQDN for cross-namespace access from CF app pods
+	fqdn := fmt.Sprintf("%s.%s.svc.cluster.local", host, namespace)
+
 	return map[string]interface{}{
-		"hostname": host,
+		"type":     "postgresql",
+		"hostname": fqdn,
 		"port":     port,
 		"name":     dbname,
+		"database": dbname,
 		"username": username,
 		"password": password,
-		"uri":      fmt.Sprintf("postgres://%s:%s@%s:%s/%s", username, password, host, port, dbname),
-		"jdbcUrl":  fmt.Sprintf("jdbc:postgresql://%s:%s/%s?user=%s&password=%s", host, port, dbname, username, password),
+		"host":     fqdn,
+		"uri":      fmt.Sprintf("postgres://%s:%s@%s:%s/%s", username, password, fqdn, port, dbname),
+		"jdbcUrl":  fmt.Sprintf("jdbc:postgresql://%s:%s/%s?user=%s&password=%s", fqdn, port, dbname, username, password),
 	}, nil
 }

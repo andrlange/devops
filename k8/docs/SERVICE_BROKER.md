@@ -29,9 +29,9 @@ cf bind-service my-app my-db
   │  /v2/service_bindings  → Bind / Unbind              │
   │                                                     │
   │  Provisioners:                                      │
-  │   postgresql → CloudNativePG Cluster CRD           │
-  │   valkey     → StatefulSet + Service + Secret      │
-  │   rabbitmq   → RabbitmqCluster CRD                 │
+  │   postgresql → CloudNativePG Cluster CRD            │
+  │   valkey     → StatefulSet + Service + Secret       │
+  │   rabbitmq   → RabbitmqCluster CRD                  │
   └─────────────────────────────────────────────────────┘
        │              │              │
        ▼              ▼              ▼
@@ -44,7 +44,7 @@ cf bind-service my-app my-db
 
 | Komponente | Version | Namespace | Beschreibung |
 |------------|---------|-----------|-------------|
-| CF Service Broker | 1.0.x | cf-services | Go OSBAPI Broker (pivotal-cf/brokerapi v11) |
+| CF Service Broker | 1.2.0 | cf-services | Go OSBAPI Broker (pivotal-cf/brokerapi v11) |
 | CloudNativePG | 1.28.1 | cnpg-system | PostgreSQL Operator (Helm) |
 | RabbitMQ Cluster Operator | 2.19.2 | rabbitmq-system | RabbitMQ Operator (kubectl apply) |
 | Valkey | 8.1 | cf-services | Direkt per StatefulSet (kein Operator) |
@@ -135,7 +135,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o /tmp/cf-servi
 # OCI Image bauen und pushen
 export PATH="$HOME/go/bin:$PATH"
 REGISTRY="artifactory.cfapps.cool/docker-local"
-IMAGE="${REGISTRY}/cf-service-broker:1.0.1-arm64"
+IMAGE="${REGISTRY}/cf-service-broker:1.2.0-arm64"
 BASE="gcr.io/distroless/static:nonroot"
 
 TMPDIR=$(mktemp -d)

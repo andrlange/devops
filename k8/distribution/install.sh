@@ -1325,16 +1325,17 @@ json.dump(d, sys.stdout)
       AK_ADMIN_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get -field=admin_password secret/artifact-keeper/app 2>/dev/null)
       crane auth login "artifacts.${LOCAL_REGISTRY}" -u admin -p "${AK_ADMIN_PASS}" 2>/dev/null
 
-      # Mirror buildpacks
-      for bp in java nodejs ruby procfile go php httpd; do
-        crane cp "paketobuildpacks/${bp}:latest" "${LOCAL_PREFIX}/buildpacks/${bp}:latest" 2>/dev/null && \
-          log_success "  Mirrored ${bp}" || log_warn "  Failed to mirror ${bp}"
+      # Mirror buildpacks (ARM64)
+      for bp in java:21.4.0 nodejs ruby procfile go php httpd; do
+        local bp_name="${bp%%:*}"
+        crane cp --platform linux/arm64 "paketobuildpacks/${bp}" "${LOCAL_PREFIX}/buildpacks/${bp_name}:latest" 2>/dev/null && \
+          log_success "  Mirrored ${bp_name}" || log_warn "  Failed to mirror ${bp_name}"
       done
 
-      # Mirror stack images
-      crane cp "paketobuildpacks/build-jammy-full:latest" "${LOCAL_PREFIX}/stacks/build-jammy-full:latest" 2>/dev/null && \
+      # Mirror stack images (ARM64)
+      crane cp --platform linux/arm64 "paketobuildpacks/build-jammy-full:latest" "${LOCAL_PREFIX}/stacks/build-jammy-full:latest" 2>/dev/null && \
         log_success "  Mirrored build-jammy-full" || log_warn "  Failed to mirror build-jammy-full"
-      crane cp "paketobuildpacks/run-jammy-full:latest" "${LOCAL_PREFIX}/stacks/run-jammy-full:latest" 2>/dev/null && \
+      crane cp --platform linux/arm64 "paketobuildpacks/run-jammy-full:latest" "${LOCAL_PREFIX}/stacks/run-jammy-full:latest" 2>/dev/null && \
         log_success "  Mirrored run-jammy-full" || log_warn "  Failed to mirror run-jammy-full"
 
       log_success "Buildpack images mirrored to local registry"
@@ -1396,6 +1397,17 @@ cs['spec']['buildImage']['image'] = f'{prefix}/stacks/build-jammy-full:latest'
 cs['spec']['runImage']['image'] = f'{prefix}/stacks/run-jammy-full:latest'
 json.dump(cs, sys.stdout)
 " | kubectl apply -f - 2>&1 | tail -1
+
+    # Patch ClusterLifecycle to use ARM64 lifecycle image from ghcr.io
+    local LIFECYCLE_ARM64_DIGEST
+    LIFECYCLE_ARM64_DIGEST=$(crane manifest ghcr.io/buildpacks-community/kpack/lifecycle 2>/dev/null \
+      | python3 -c "import json,sys; m=json.load(sys.stdin); [print(p['digest']) for p in m.get('manifests',[]) if p.get('platform',{}).get('architecture')=='arm64']" 2>/dev/null)
+    if [ -n "${LIFECYCLE_ARM64_DIGEST}" ]; then
+      kubectl patch clusterlifecycle default-lifecycle --type merge \
+        -p "{\"spec\":{\"image\":\"ghcr.io/buildpacks-community/kpack/lifecycle@${LIFECYCLE_ARM64_DIGEST}\"}}" 2>&1 | tail -1
+    else
+      log_warn "Could not determine ARM64 lifecycle digest — ClusterLifecycle may need manual patching"
+    fi
 
     # Add all buildpacks to ClusterBuilder order
     kubectl get clusterbuilder cf-kpack-cluster-builder -o json | python3 -c "
@@ -1714,7 +1726,7 @@ install_phase_7() {
         -o "${BUILD_DIR}/broker" . 2>&1 | tail -1
 
       local BROKER_REGISTRY="${REGISTRY:-artifactory.cfapps.cool}/docker-local"
-      local BROKER_IMAGE="${BROKER_REGISTRY}/cf-service-broker:1.0.1-arm64"
+      local BROKER_IMAGE="${BROKER_REGISTRY}/cf-service-broker:1.2.0-arm64"
       local BASE_IMAGE="gcr.io/distroless/static:nonroot"
       local TMPDIR_IMG LAYER
       TMPDIR_IMG=$(mktemp -d)

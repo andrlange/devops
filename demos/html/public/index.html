@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Foundry Demo</title>
+    <link href="css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --spring-green: #6db33f;
+            --spring-green-dark: #5a9e2f;
+            --spring-bg: #191e1e;
+            --spring-card: #1e2626;
+            --spring-border: #2a3838;
+        }
+        body {
+            background-color: var(--spring-bg);
+            color: #e0e0e0;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+        }
+        .navbar {
+            background-color: var(--spring-card) !important;
+            border-bottom: 2px solid var(--spring-green);
+        }
+        .navbar-brand {
+            color: var(--spring-green) !important;
+            font-weight: 700;
+            font-size: 1.4rem;
+            letter-spacing: -0.5px;
+        }
+        .card {
+            background-color: var(--spring-card);
+            border: 1px solid var(--spring-border);
+            border-radius: 8px;
+        }
+        .card-header {
+            background-color: rgba(109, 179, 63, 0.1);
+            border-bottom: 1px solid var(--spring-border);
+            font-weight: 600;
+            color: var(--spring-green);
+        }
+        .table {
+            --bs-table-bg: transparent;
+            --bs-table-color: #e0e0e0;
+            margin-bottom: 0;
+        }
+        .table td, .table th {
+            border-color: var(--spring-border);
+            padding: 0.6rem 1rem;
+            vertical-align: middle;
+        }
+        .table .label {
+            color: #9ab89a;
+            font-weight: 500;
+            white-space: nowrap;
+            width: 1%;
+        }
+        .table .value {
+            font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+            font-size: 0.9rem;
+            word-break: break-all;
+        }
+        .hero {
+            border-left: 4px solid var(--spring-green);
+            padding-left: 1.5rem;
+        }
+        .hero h1 {
+            color: #fff;
+            font-weight: 700;
+        }
+        .hero p {
+            color: #9ab89a;
+        }
+        .status-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: var(--spring-green);
+            margin-right: 6px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        footer {
+            color: #5a6e5a;
+        }
+        footer a {
+            color: var(--spring-green);
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark px-4">
+    <span class="navbar-brand">
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" fill="currentColor" class="me-2" viewBox="0 0 16 16">
+            <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0M4.5 7.5a.5.5 0 0 1 0-1h7a.5.5 0 0 1 0 1z" style="fill: #6db33f"/>
+        </svg>
+        Cloud Foundry Demo
+    </span>
+    <span class="d-flex align-items-center gap-2">
+        <span class="status-dot"></span>
+        <span class="text-light small">Running on Korifi</span>
+    </span>
+</nav>
+
+<div class="container py-5">
+
+    <div class="hero mb-5">
+        <h1>Application Instance Info</h1>
+        <p class="lead mb-0">Live environment data from <code>VCAP_APPLICATION</code> &mdash; served by the Paketo httpd buildpack.</p>
+    </div>
+
+    <div class="row g-4">
+
+        <!-- Application Identity -->
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">Application Identity</div>
+                <div class="card-body p-0">
+                    <table class="table">
+                        <tr><td class="label">App Name</td><td class="value" id="app-name"></td></tr>
+                        <tr><td class="label">App ID</td><td class="value" id="app-id"></td></tr>
+                        <tr><td class="label">Version</td><td class="value" id="app-version"></td></tr>
+                        <tr><td class="label">Instance Index</td><td class="value"><!--#echo var="CF_INSTANCE_INDEX" encoding="entity" --></td></tr>
+                        <tr><td class="label">Instance GUID</td><td class="value"><!--#echo var="CF_INSTANCE_GUID" encoding="entity" --></td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Organization & Space -->
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">Organization &amp; Space</div>
+                <div class="card-body p-0">
+                    <table class="table">
+                        <tr><td class="label">Organization</td><td class="value" id="org-name"></td></tr>
+                        <tr><td class="label">Org ID</td><td class="value" id="org-id"></td></tr>
+                        <tr><td class="label">Space</td><td class="value" id="space-name"></td></tr>
+                        <tr><td class="label">Space ID</td><td class="value" id="space-id"></td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Runtime Environment -->
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">Runtime Environment</div>
+                <div class="card-body p-0">
+                    <table class="table">
+                        <tr><td class="label">CF API</td><td class="value" id="cf-api"></td></tr>
+                        <tr><td class="label">Routes</td><td class="value" id="app-uris"></td></tr>
+                        <tr><td class="label">Internal IP</td><td class="value"><!--#echo var="CF_INSTANCE_INTERNAL_IP" encoding="entity" --></td></tr>
+                        <tr><td class="label">Port</td><td class="value"><!--#echo var="SERVER_PORT" encoding="entity" --></td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Resource Limits -->
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">Resource Limits</div>
+                <div class="card-body p-0">
+                    <table class="table">
+                        <tr><td class="label">Memory Limit</td><td class="value"><!--#echo var="MEMORY_LIMIT" encoding="entity" --></td></tr>
+                        <tr><td class="label">Disk Limit</td><td class="value"><!--#echo var="DISK_QUOTA" encoding="entity" --></td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Raw VCAP_APPLICATION -->
+    <div class="card mt-4">
+        <div class="card-header">Raw VCAP_APPLICATION</div>
+        <div class="card-body">
+            <pre class="mb-0" id="vcap-raw" style="color: #9ab89a; white-space: pre-wrap; word-break: break-all; font-size: 0.85rem;"><!--#echo var="VCAP_APPLICATION" encoding="entity" --></pre>
+        </div>
+    </div>
+
+    <footer class="text-center mt-5 pt-4 border-top" style="border-color: var(--spring-border) !important;">
+        <p>Deployed with <a href="https://www.cloudfoundry.org/">Cloud Foundry</a> (Korifi) &mdash; Paketo httpd Buildpack</p>
+    </footer>
+
+</div>
+
+<script>
+(function() {
+    var raw = document.getElementById('vcap-raw');
+    if (!raw) return;
+    var text = raw.textContent.trim();
+    if (!text || text === '(none)' || text.indexOf('error') !== -1) return;
+    try {
+        var vcap = JSON.parse(text);
+        var map = {
+            'app-name': vcap.application_name,
+            'app-id': vcap.application_id,
+            'app-version': vcap.application_version,
+            'org-name': vcap.organization_name,
+            'org-id': vcap.organization_id,
+            'space-name': vcap.space_name,
+            'space-id': vcap.space_id,
+            'cf-api': vcap.cf_api,
+            'app-uris': (vcap.application_uris || []).join(', ')
+        };
+        for (var id in map) {
+            var el = document.getElementById(id);
+            if (el) el.textContent = map[id] || 'n/a';
+        }
+        // Pretty-print the raw JSON
+        raw.textContent = JSON.stringify(vcap, null, 2);
+    } catch(e) {
+        // VCAP not valid JSON — leave raw output as-is
+    }
+})();
+</script>
+
+</body>
+</html>

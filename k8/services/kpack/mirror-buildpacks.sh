@@ -21,8 +21,16 @@ export PATH="${HOME}/go/bin:${PATH}"
 
 command -v crane >/dev/null 2>&1 || { echo "ERROR: crane not found. Install with: go install github.com/google/go-containerregistry/cmd/crane@latest"; exit 1; }
 
-# Buildpack images to mirror
-BUILDPACKS=(java nodejs ruby procfile go php httpd)
+# Buildpack images to mirror (name:version, omit version for latest)
+BUILDPACKS=(
+  "java:21.4.0"
+  "nodejs"
+  "ruby"
+  "procfile"
+  "go"
+  "php"
+  "httpd"
+)
 
 # Stack images to mirror
 STACK_BUILD="paketobuildpacks/build-jammy-full"
@@ -32,11 +40,20 @@ echo "=== Mirroring Paketo buildpacks to ${LOCAL_REGISTRY} ==="
 echo ""
 
 echo "--- Buildpack images ---"
-for bp in "${BUILDPACKS[@]}"; do
-  SRC="paketobuildpacks/${bp}"
+BP_NAMES=()
+for entry in "${BUILDPACKS[@]}"; do
+  bp="${entry%%:*}"
+  version="${entry#*:}"
+  BP_NAMES+=("${bp}")
+
+  if [ "${bp}" = "${version}" ]; then
+    SRC="paketobuildpacks/${bp}"
+  else
+    SRC="paketobuildpacks/${bp}:${version}"
+  fi
   DST="${LOCAL_PREFIX}/buildpacks/${bp}"
   echo -n "  ${SRC} -> ${DST}... "
-  if crane cp "${SRC}" "${DST}" 2>/dev/null; then
+  if crane cp --platform linux/arm64 "${SRC}" "${DST}" 2>/dev/null; then
     echo "done"
   else
     echo "FAILED"
@@ -49,7 +66,7 @@ for img in "${STACK_BUILD}" "${STACK_RUN}"; do
   name=$(basename "${img}")
   DST="${LOCAL_PREFIX}/stacks/${name}"
   echo -n "  ${img} -> ${DST}... "
-  if crane cp "${img}" "${DST}" 2>/dev/null; then
+  if crane cp --platform linux/arm64 "${img}" "${DST}" 2>/dev/null; then
     echo "done"
   else
     echo "FAILED"
@@ -60,13 +77,14 @@ echo ""
 echo "=== Mirror complete ==="
 
 if [ "${1:-}" = "--update-kpack" ]; then
+  BP_LIST="${BP_NAMES[*]}"
   echo ""
   echo "--- Updating kpack ClusterStore to local images ---"
   kubectl get clusterstore cf-default-buildpacks -o json | python3 -c "
 import json, sys
 cs = json.load(sys.stdin)
 prefix = '${LOCAL_PREFIX}'
-cs['spec']['sources'] = [{'image': f\"{prefix}/buildpacks/{bp}\"} for bp in '${BUILDPACKS[*]}'.split()]
+cs['spec']['sources'] = [{'image': f\"{prefix}/buildpacks/{bp}\"} for bp in '${BP_LIST}'.split()]
 json.dump(cs, sys.stdout)
 " | kubectl apply -f - 2>&1 | tail -1
 

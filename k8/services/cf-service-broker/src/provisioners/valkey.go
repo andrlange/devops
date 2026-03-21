@@ -176,7 +176,9 @@ func (v *Valkey) GetCredentials(ctx context.Context, client *k8sclient.Client, n
 	}
 
 	return map[string]interface{}{
+		"type":     "redis",
 		"hostname": string(secret.Data["host"]),
+		"host":     string(secret.Data["host"]),
 		"port":     6379,
 		"password": string(secret.Data["password"]),
 		"uri":      string(secret.Data["uri"]),

@@ -16,20 +16,20 @@ Developer Host                          Lima VM (K3s)
 │          │   -service     │       │                                        │
 └──────────┘                │       ▼                                        │
                             │  ┌──────────────────────────────────────┐      │
-                            │  │  CF Service Broker (OSBAPI v2)      │      │
-                            │  │  cf-services Namespace              │      │
+                            │  │  CF Service Broker (OSBAPI v2)       │      │
+                            │  │  cf-services Namespace               │      │
                             │  │                                      │      │
                             │  │  Services:                           │      │
-                            │  │   postgresql → CloudNativePG CRD    │      │
-                            │  │   valkey     → StatefulSet + Svc    │      │
-                            │  │   rabbitmq   → RabbitmqCluster CRD  │      │
+                            │  │   postgresql → CloudNativePG CRD     │      │
+                            │  │   valkey     → StatefulSet + Svc     │      │
+                            │  │   rabbitmq   → RabbitmqCluster CRD   │      │
                             │  └──────────────────────────────────────┘      │
                             │       │              │              │          │
                             │       ▼              ▼              ▼          │
-                            │  CloudNativePG   Valkey Pod    RabbitMQ       │
-                            │  Operator        (direct)      Operator       │
-                            │  (cnpg-system)                 (rabbitmq-     │
-                            │                                 system)       │
+                            │  CloudNativePG   Valkey Pod    RabbitMQ        │
+                            │  Operator        (direct)      Operator        │
+                            │  (cnpg-system)                 (rabbitmq-      │
+                            │                                 system)        │
                             └────────────────────────────────────────────────┘
 ```
 
@@ -73,7 +73,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o /tmp/cf-servi
 # OCI Image bauen und pushen (Pattern wie kpack)
 export PATH="$HOME/go/bin:$PATH"
 REGISTRY="artifactory.cfapps.cool/docker-local"
-IMAGE="${REGISTRY}/cf-service-broker:1.0.1-arm64"
+IMAGE="${REGISTRY}/cf-service-broker:1.2.0-arm64"
 BASE="gcr.io/distroless/static:nonroot"
 
 TMPDIR=$(mktemp -d)

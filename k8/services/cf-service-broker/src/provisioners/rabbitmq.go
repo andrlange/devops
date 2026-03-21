@@ -100,13 +100,18 @@ func (r *RabbitMQ) GetCredentials(ctx context.Context, client *k8sclient.Client,
 		port = "5672"
 	}
 
+	// Use FQDN for cross-namespace access from CF app pods
+	fqdn := fmt.Sprintf("%s.%s.svc.cluster.local", host, namespace)
+
 	return map[string]interface{}{
-		"hostname":     host,
+		"type":         "rabbitmq",
+		"hostname":     fqdn,
+		"host":         fqdn,
 		"port":         port,
 		"username":     username,
 		"password":     password,
-		"uri":          fmt.Sprintf("amqp://%s:%s@%s:%s", username, password, host, port),
-		"http_api_uri": fmt.Sprintf("http://%s:%s@%s:15672/api", username, password, host),
+		"uri":          fmt.Sprintf("amqp://%s:%s@%s:%s", username, password, fqdn, port),
+		"http_api_uri": fmt.Sprintf("http://%s:%s@%s:15672/api", username, password, fqdn),
 		"vhost":        "/",
 	}, nil
 }
