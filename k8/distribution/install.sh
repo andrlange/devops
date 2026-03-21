@@ -1425,6 +1425,52 @@ json.dump(cm, sys.stdout)
     mark_component_installed "phase6_contour_gateway" "$STATE_FILE"
   fi
 
+  # --- Configure TLS cert reflection for Korifi ---
+  if ! component_is_installed "phase6_cert_reflection" "$STATE_FILE"; then
+    log_step "Configuring TLS certificate reflection for Korifi..."
+
+    # Delete self-signed cert created by Korifi (replaced by reflected LE cert)
+    kubectl delete certificate korifi-workloads-ingress-cert -n korifi 2>/dev/null || true
+
+    # ReferenceGrant: allow Gateway in korifi-gateway to use Secrets in korifi
+    cat <<'RGEOF' | kubectl apply -f -
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-cert-ref
+  namespace: korifi
+spec:
+  from:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: korifi-gateway
+  to:
+  - group: ""
+    kind: Secret
+RGEOF
+
+    # Update Gateway to use reflected wildcard-apps-tls from korifi namespace
+    kubectl get gateway korifi -n korifi-gateway -o json | python3 -c "
+import json, sys
+gw = json.load(sys.stdin)
+for l in gw['spec']['listeners']:
+    if l['name'] == 'https-apps' and 'tls' in l:
+        l['tls']['certificateRefs'] = [{'group': '', 'kind': 'Secret', 'name': 'wildcard-apps-tls', 'namespace': 'korifi'}]
+json.dump(gw, sys.stdout)
+" | kubectl apply -f - 2>&1 | tail -1
+
+    # Verify Gateway is programmed with LE cert
+    sleep 5
+    local gw_status
+    gw_status=$(kubectl get gateway korifi -n korifi-gateway -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null || echo "Unknown")
+    if [ "$gw_status" = "True" ]; then
+      log_success "TLS cert reflection configured (Let's Encrypt wildcard via Reflector)"
+    else
+      log_warn "Gateway PROGRAMMED=$gw_status — check ReferenceGrant and reflected secret"
+    fi
+    mark_component_installed "phase6_cert_reflection" "$STATE_FILE"
+  fi
+
   # --- Create cf-admin credentials ---
   if ! component_is_installed "phase6_cf_admin" "$STATE_FILE"; then
     log_step "Creating cf-admin user credentials..."

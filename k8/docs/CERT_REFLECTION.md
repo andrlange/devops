@@ -20,15 +20,15 @@ cert-manager (DNS-01)           Kubernetes Reflector            Contour Gateway
       │                               │                              │
       │  stellt aus / erneuert        │  beobachtet Annotations      │
       ▼                               ▼                              ▼
-┌─────────────────────┐    ┌─────────────────────┐    ┌──────────────────────────┐
-│ wildcard-apps-tls   │───▶│ wildcard-apps-tls   │◀───│ Gateway Listener         │
-│ (traefik Namespace) │    │ (korifi Namespace)   │    │ https-apps               │
-│                     │    │                      │    │ tls.certificateRefs:     │
-│ Annotations:        │    │ Automatisch erzeugt  │    │   name: wildcard-apps-tls│
-│  reflection-allowed │    │ und synchronisiert   │    │   namespace: korifi      │
-│  reflection-auto-   │    │ bei jeder Aenderung  │    │                          │
-│  enabled            │    │                      │    │                          │
-└─────────────────────┘    └─────────────────────┘    └──────────────────────────┘
+┌─────────────────────┐    ┌──────────────────────┐    ┌───────────────────────────┐
+│ wildcard-apps-tls   │───▶│ wildcard-apps-tls    │◀───│ Gateway Listener          │
+│ (traefik Namespace) │    │ (korifi Namespace)   │    │ https-apps                │
+│                     │    │                      │    │ tls.certificateRefs:      │
+│ Annotations:        │    │ Automatisch erzeugt  │    │   name: wildcard-apps-tls │
+│  reflection-allowed │    │ und synchronisiert   │    │   namespace: korifi       │
+│  reflection-auto-   │    │ bei jeder Aenderung  │    │                           │
+│  enabled            │    │                      │    │                           │
+└─────────────────────┘    └──────────────────────┘    └───────────────────────────┘
 ```
 
 ## Konfiguration
@@ -54,6 +54,28 @@ type: kubernetes.io/tls
 ### Ziel
 
 Der Reflector erstellt automatisch eine Kopie als `wildcard-apps-tls` im `korifi` Namespace. Das Korifi Gateway referenziert dieses Secret.
+
+### ReferenceGrant
+
+Das Gateway lebt im `korifi-gateway` Namespace, das reflektierte Secret im `korifi` Namespace. Contour erlaubt Cross-Namespace Secret-Referenzen nur mit einem expliziten `ReferenceGrant`:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-cert-ref
+  namespace: korifi
+spec:
+  from:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: korifi-gateway
+  to:
+  - group: ""
+    kind: Secret
+```
+
+Ohne diesen ReferenceGrant meldet das Gateway `Programmed=False` mit der Fehlermeldung: `namespace must match the Gateway's namespace or be covered by a ReferenceGrant`.
 
 ### Erneuerung
 
