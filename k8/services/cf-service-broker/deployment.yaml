@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cf-service-broker
+  namespace: cf-services
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cf-service-broker
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "create", "delete", "watch"]
+  - apiGroups: ["rabbitmq.com"]
+    resources: ["rabbitmqclusters"]
+    verbs: ["get", "list", "create", "delete", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "create", "delete", "watch"]
+  - apiGroups: [""]
+    resources: ["services", "secrets", "configmaps"]
+    verbs: ["get", "list", "create", "update", "delete", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cf-service-broker
+subjects:
+  - kind: ServiceAccount
+    name: cf-service-broker
+    namespace: cf-services
+roleRef:
+  kind: ClusterRole
+  name: cf-service-broker
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cf-service-broker
+  namespace: cf-services
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cf-service-broker
+  template:
+    metadata:
+      labels:
+        app: cf-service-broker
+    spec:
+      serviceAccountName: cf-service-broker
+      imagePullSecrets:
+        - name: artifact-keeper-pull
+      containers:
+        - name: broker
+          image: artifactory.cfapps.cool/docker-local/cf-service-broker:1.0.0-arm64
+          ports:
+            - containerPort: 8080
+          env:
+            - name: BROKER_USERNAME
+              value: "admin"
+            - name: BROKER_PASSWORD
+              value: "vxfSHItmMi82oL1vrGhV"
+            - name: SERVICE_NAMESPACE
+              value: "cf-services"
+            - name: VALKEY_IMAGE
+              value: "valkey/valkey:8.1-alpine"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cf-service-broker
+  namespace: cf-services
+spec:
+  selector:
+    app: cf-service-broker
+  ports:
+    - port: 80
+      targetPort: 8080
