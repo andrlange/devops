@@ -44,6 +44,17 @@ func (b *Broker) Provision(ctx context.Context, instanceID string, details domai
 	}
 
 	name := provisioners.ResourceName(instanceID)
+
+	// Idempotent: if instance already exists, return success
+	if _, err := getInstance(ctx, b.client.Typed, b.namespace, instanceID); err == nil {
+		log.Printf("Instance %s already exists, returning success", instanceID)
+		return domain.ProvisionedServiceSpec{
+			IsAsync:       true,
+			OperationData: "provisioning",
+			AlreadyExists: true,
+		}, nil
+	}
+
 	log.Printf("Provisioning %s (plan=%s, name=%s)", details.ServiceID, details.PlanID, name)
 
 	if err := prov.Provision(ctx, b.client, name, b.namespace, details.PlanID); err != nil {
