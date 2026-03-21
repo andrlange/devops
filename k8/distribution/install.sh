@@ -1261,38 +1261,50 @@ subjects:
   name: cf-admin
 CRBEOF
 
-    # Create cf-admin kubeconfig
+    # Add cf-admin context to existing kubeconfig (config-k3s)
+    local MAIN_KUBECONFIG="${CF_ADMIN_DIR}/config-k3s"
     local CLUSTER_SERVER CLUSTER_CA
     CLUSTER_SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
     CLUSTER_CA=$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
+
+    # Build temporary kubeconfig for cf-admin
+    local TMP_CFKUBECONFIG
+    TMP_CFKUBECONFIG=$(mktemp)
 
     kubectl config set-cluster k3s-cf \
       --server="${CLUSTER_SERVER}" \
       --certificate-authority=<(echo "${CLUSTER_CA}" | base64 -d) \
       --embed-certs=true \
-      --kubeconfig="${CF_ADMIN_DIR}/cf-admin-kubeconfig" 2>/dev/null
+      --kubeconfig="${TMP_CFKUBECONFIG}" 2>/dev/null
 
     kubectl config set-credentials cf-admin \
       --client-certificate="${CF_ADMIN_DIR}/cf-admin.crt" \
       --client-key="${CF_ADMIN_DIR}/cf-admin.key" \
       --embed-certs=true \
-      --kubeconfig="${CF_ADMIN_DIR}/cf-admin-kubeconfig" 2>/dev/null
+      --kubeconfig="${TMP_CFKUBECONFIG}" 2>/dev/null
 
     kubectl config set-context cf-admin \
       --cluster=k3s-cf \
       --user=cf-admin \
-      --kubeconfig="${CF_ADMIN_DIR}/cf-admin-kubeconfig" 2>/dev/null
+      --kubeconfig="${TMP_CFKUBECONFIG}" 2>/dev/null
 
-    kubectl config use-context cf-admin \
-      --kubeconfig="${CF_ADMIN_DIR}/cf-admin-kubeconfig" 2>/dev/null
+    # Merge cf-admin context into main kubeconfig
+    cp "${MAIN_KUBECONFIG}" "${MAIN_KUBECONFIG}.bak"
+    KUBECONFIG="${MAIN_KUBECONFIG}:${TMP_CFKUBECONFIG}" \
+      kubectl config view --flatten > "${MAIN_KUBECONFIG}.merged"
+    mv "${MAIN_KUBECONFIG}.merged" "${MAIN_KUBECONFIG}"
+    rm -f "${TMP_CFKUBECONFIG}"
 
-    # Verify permissions
+    # Switch back to k3s-devops context
+    kubectl --kubeconfig="${MAIN_KUBECONFIG}" config use-context k3s-devops 2>/dev/null
+
+    # Verify permissions with cf-admin context
     local can_list
-    can_list=$(kubectl --kubeconfig="${CF_ADMIN_DIR}/cf-admin-kubeconfig" auth can-i list cforgs.korifi.cloudfoundry.org --all-namespaces 2>/dev/null || echo "no")
+    can_list=$(kubectl --kubeconfig="${MAIN_KUBECONFIG}" --context=cf-admin auth can-i list cforgs.korifi.cloudfoundry.org --all-namespaces 2>/dev/null || echo "no")
     if [ "$can_list" = "yes" ]; then
-      log_success "cf-admin credentials created at ${CF_ADMIN_DIR}/cf-admin-kubeconfig"
+      log_success "cf-admin context merged into ${MAIN_KUBECONFIG}"
     else
-      log_warn "cf-admin credentials created but permission check failed"
+      log_warn "cf-admin context merged but permission check failed"
     fi
 
     rm -f /tmp/cf-admin.csr
@@ -1305,12 +1317,16 @@ CRBEOF
   echo ""
   echo -e "  ${BOLD}CF API:${NC}     https://api.${CF_DOMAIN}"
   echo -e "  ${BOLD}App Domain:${NC} *.${CF_DOMAIN}"
-  echo -e "  ${BOLD}Kubeconfig:${NC} ~/.kube/cf-admin-kubeconfig"
+  echo ""
+  echo -e "  ${BOLD}Kubeconfig:${NC} export KUBECONFIG=~/.kube/config-k3s"
+  echo -e "  ${BOLD}Contexts:${NC}"
+  echo -e "    kubectl config use-context k3s-devops   # Cluster Admin"
+  echo -e "    kubectl config use-context cf-admin      # CF Operations"
   echo ""
   echo -e "  ${BOLD}Next steps:${NC}"
   echo -e "  brew install cloudfoundry/tap/cf-cli@8"
   echo -e "  cf api https://api.${CF_DOMAIN} --skip-ssl-validation"
-  echo -e "  KUBECONFIG=~/.kube/cf-admin-kubeconfig cf login"
+  echo -e "  kubectl config use-context cf-admin && cf login"
   echo -e "  cf create-org dev && cf target -o dev"
   echo -e "  cf create-space test && cf target -s test"
   echo -e "  cf push my-app"

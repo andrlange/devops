@@ -6,7 +6,7 @@ Eine Anleitung zum Deployen einer Spring Boot 4 Applikation mit PostgreSQL 18 au
 
 - Phase 1-5 deployed, Phase 6 (Korifi) installiert und funktional
 - `cf` CLI installiert (`brew install cloudfoundry/tap/cf-cli@8`)
-- `cf-admin` Kubeconfig vorhanden (`~/.kube/cf-admin-kubeconfig`)
+- `cf-admin` Context in Kubeconfig vorhanden (`kubectl config use-context cf-admin`)
 - Java 21+ und Maven/Gradle auf dem Host installiert
 - CF API erreichbar: `curl -sk https://api.app.cfapps.cool/v3/info`
 
@@ -19,7 +19,8 @@ Eine Anleitung zum Deployen einer Spring Boot 4 Applikation mit PostgreSQL 18 au
 cf api https://api.app.cfapps.cool --skip-ssl-validation
 
 # Login als cf-admin
-KUBECONFIG=~/.kube/cf-admin-kubeconfig cf login
+kubectl config use-context cf-admin
+cf login
 # Waehle "1. cf-admin" wenn aufgefordert
 
 # Org und Space setzen (falls noch nicht vorhanden)
@@ -396,11 +397,11 @@ cd demo-app
 
 ```bash
 # Sicherstellen, dass CF-Login aktiv ist
-KUBECONFIG=~/.kube/cf-admin-kubeconfig cf target
+cf target
 # org: dev, space: test
 
 # App deployen
-KUBECONFIG=~/.kube/cf-admin-kubeconfig cf push
+cf push
 ```
 
 `cf push` fuehrt folgende Schritte automatisch aus:

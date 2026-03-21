@@ -565,40 +565,60 @@ subjects:
 EOF
 ```
 
-#### Schritt 4: Kubeconfig fuer cf-admin erstellen
+#### Schritt 4: cf-admin Context in bestehende Kubeconfig mergen
+
+Statt einer separaten Kubeconfig wird der `cf-admin` Context in die bestehende `config-k3s` integriert. So genuegt ein einziges `export KUBECONFIG=~/.kube/config-k3s`.
 
 ```bash
 # Cluster-Infos aus bestehender Kubeconfig uebernehmen
 CLUSTER_SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
 CLUSTER_CA=$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
 
-# Separate Kubeconfig fuer cf-admin
+# Temporaere Kubeconfig fuer cf-admin erstellen
+TMP_CFKUBECONFIG=$(mktemp)
+
 kubectl config set-cluster k3s-cf \
   --server="${CLUSTER_SERVER}" \
   --certificate-authority=<(echo "${CLUSTER_CA}" | base64 -d) \
   --embed-certs=true \
-  --kubeconfig=~/.kube/cf-admin-kubeconfig
+  --kubeconfig="${TMP_CFKUBECONFIG}"
 
 kubectl config set-credentials cf-admin \
   --client-certificate=~/.kube/cf-admin.crt \
   --client-key=~/.kube/cf-admin.key \
   --embed-certs=true \
-  --kubeconfig=~/.kube/cf-admin-kubeconfig
+  --kubeconfig="${TMP_CFKUBECONFIG}"
 
 kubectl config set-context cf-admin \
   --cluster=k3s-cf \
   --user=cf-admin \
-  --kubeconfig=~/.kube/cf-admin-kubeconfig
+  --kubeconfig="${TMP_CFKUBECONFIG}"
 
-kubectl config use-context cf-admin \
-  --kubeconfig=~/.kube/cf-admin-kubeconfig
+# In bestehende Kubeconfig mergen
+cp ~/.kube/config-k3s ~/.kube/config-k3s.bak
+KUBECONFIG=~/.kube/config-k3s:${TMP_CFKUBECONFIG} \
+  kubectl config view --flatten > ~/.kube/config-k3s.merged
+mv ~/.kube/config-k3s.merged ~/.kube/config-k3s
+rm -f "${TMP_CFKUBECONFIG}"
+
+# Zurueck zum Cluster-Admin Context
+kubectl config use-context k3s-devops
+```
+
+Nach dem Merge stehen zwei Contexts zur Verfuegung:
+
+```bash
+kubectl config get-contexts
+# CURRENT   NAME         CLUSTER      AUTHINFO     NAMESPACE
+# *         k3s-devops   k3s-devops   k3s-devops            # Cluster Admin
+#           cf-admin     k3s-cf       cf-admin               # CF Operations
 ```
 
 #### Schritt 5: Berechtigungen validieren
 
 ```bash
 # cf-admin muss Korifi-Ressourcen verwalten koennen
-kubectl --kubeconfig=~/.kube/cf-admin-kubeconfig auth can-i list cforgs.korifi.cloudfoundry.org --all-namespaces
+kubectl --context=cf-admin auth can-i list cforgs.korifi.cloudfoundry.org --all-namespaces
 # yes
 ```
 
@@ -609,17 +629,19 @@ kubectl --kubeconfig=~/.kube/cf-admin-kubeconfig auth can-i list cforgs.korifi.c
 cf api https://api.app.cfapps.cool --skip-ssl-validation
 
 # Login mit cf-admin Kubeconfig (waehlt automatisch cf-admin Credentials)
-KUBECONFIG=~/.kube/cf-admin-kubeconfig cf login
+kubectl config use-context cf-admin
+cf login
 # Waehle "1. cf-admin" wenn aufgefordert
 
 # Alternativ nicht-interaktiv (fuer Skripte):
-echo "1" | KUBECONFIG=~/.kube/cf-admin-kubeconfig cf login
+echo "1" | kubectl config use-context cf-admin
+cf login
 
 # Erste Org und Space erstellen
-KUBECONFIG=~/.kube/cf-admin-kubeconfig cf create-org dev
-KUBECONFIG=~/.kube/cf-admin-kubeconfig cf target -o dev
-KUBECONFIG=~/.kube/cf-admin-kubeconfig cf create-space test
-KUBECONFIG=~/.kube/cf-admin-kubeconfig cf target -s test
+cf create-org dev
+cf target -o dev
+cf create-space test
+cf target -s test
 ```
 
 ### Validierung
