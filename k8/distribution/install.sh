@@ -592,6 +592,29 @@ REGEOF
     log_info "cert-manager already installed, skipping"
   fi
 
+  # --- 1.8 Kubernetes Reflector (cross-namespace secret sync) ---
+  if ! component_is_installed "REFLECTOR" "$STATE_FILE"; then
+    log_step "1.8 — Kubernetes Reflector"
+    helm repo add emberstack https://emberstack.github.io/helm-charts 2>/dev/null || true
+    helm install reflector emberstack/reflector -n kube-system 2>&1 | tail -1
+    wait_for_pods "kube-system" 60
+
+    # Annotate wildcard-apps cert for reflection to korifi namespace
+    if kubectl get secret wildcard-apps-tls -n traefik &>/dev/null; then
+      kubectl annotate secret wildcard-apps-tls -n traefik \
+        reflector.v1.k8s.emberstack.com/reflection-allowed="true" \
+        reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces="korifi" \
+        reflector.v1.k8s.emberstack.com/reflection-auto-enabled="true" \
+        reflector.v1.k8s.emberstack.com/reflection-auto-namespaces="korifi" \
+        --overwrite 2>&1 | tail -1
+    fi
+
+    log_success "Kubernetes Reflector installed"
+    mark_component_installed "REFLECTOR" "$STATE_FILE"
+  else
+    log_info "Kubernetes Reflector already installed, skipping"
+  fi
+
   mark_phase_complete 1 "$STATE_FILE"
   log_success "Phase 1 — Foundation complete"
   echo ""
