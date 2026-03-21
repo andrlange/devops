@@ -1156,6 +1156,54 @@ install_phase_6() {
     mark_component_installed "phase6_korifi" "$STATE_FILE"
   fi
 
+  # --- Configure Buildpacks ---
+  if ! component_is_installed "phase6_buildpacks" "$STATE_FILE"; then
+    log_step "Configuring buildpacks (Java, Go, Node.js, PHP, Ruby, httpd, procfile)..."
+
+    # Add all buildpack images to ClusterStore
+    kubectl get clusterstore cf-default-buildpacks -o json | python3 -c "
+import json, sys
+cs = json.load(sys.stdin)
+existing = {s['image'] for s in cs['spec']['sources']}
+needed = [
+    'paketobuildpacks/java',
+    'paketobuildpacks/go',
+    'paketobuildpacks/nodejs',
+    'paketobuildpacks/php',
+    'paketobuildpacks/ruby',
+    'paketobuildpacks/httpd',
+    'paketobuildpacks/procfile',
+]
+for bp in needed:
+    if bp not in existing:
+        cs['spec']['sources'].append({'image': bp})
+json.dump(cs, sys.stdout)
+" | kubectl apply -f - 2>&1 | tail -1
+
+    # Add all buildpacks to ClusterBuilder order
+    kubectl get clusterbuilder cf-kpack-cluster-builder -o json | python3 -c "
+import json, sys
+cb = json.load(sys.stdin)
+existing = {g['id'] for o in cb['spec']['order'] for g in o['group']}
+needed = [
+    'paketo-buildpacks/java',
+    'paketo-buildpacks/go',
+    'paketo-buildpacks/nodejs',
+    'paketo-buildpacks/php',
+    'paketo-buildpacks/ruby',
+    'paketo-buildpacks/httpd',
+    'paketo-buildpacks/procfile',
+]
+for bp in needed:
+    if bp not in existing:
+        cb['spec']['order'].append({'group': [{'id': bp}]})
+json.dump(cb, sys.stdout)
+" | kubectl apply -f - 2>&1 | tail -1
+
+    log_success "Buildpacks configured (builder image rebuild may take 5-10 min under QEMU)"
+    mark_component_installed "phase6_buildpacks" "$STATE_FILE"
+  fi
+
   # --- Patch Contour Gateway API config ---
   if ! component_is_installed "phase6_contour_gateway" "$STATE_FILE"; then
     log_step "Patching Contour ConfigMap for Gateway API..."

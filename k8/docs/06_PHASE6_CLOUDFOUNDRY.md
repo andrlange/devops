@@ -331,61 +331,55 @@ kubectl apply -f registry-credentials.yaml
 
 ### ClusterStore, ClusterStack und ClusterBuilder
 
+Die Korifi Helm-Installation erstellt automatisch einen ClusterStore (`cf-default-buildpacks`), ClusterStack (`cf-default-stack`) und ClusterBuilder (`cf-kpack-cluster-builder`) mit Paketo Buildpacks. Die Standard-Konfiguration enthaelt Java, Go, Node.js, Ruby und Procfile.
+
+Fuer zusaetzliche Sprachen (PHP, httpd/Apache) muessen Buildpacks nachtraeglich hinzugefuegt werden. Der Installer (`install.sh`) erledigt dies automatisch. Manuell:
+
+```bash
+# Buildpack zum ClusterStore hinzufuegen (Beispiel: PHP)
+kubectl get clusterstore cf-default-buildpacks -o json | python3 -c "
+import json, sys
+cs = json.load(sys.stdin)
+cs['spec']['sources'].append({'image': 'paketobuildpacks/php'})
+json.dump(cs, sys.stdout)
+" | kubectl apply -f -
+
+# Buildpack zum ClusterBuilder hinzufuegen
+kubectl get clusterbuilder cf-kpack-cluster-builder -o json | python3 -c "
+import json, sys
+cb = json.load(sys.stdin)
+cb['spec']['order'].append({'group': [{'id': 'paketo-buildpacks/php'}]})
+json.dump(cb, sys.stdout)
+" | kubectl apply -f -
+```
+
+**Verfuegbare Buildpacks (automatisch installiert):**
+
+| Buildpack | Sprache/Zweck | JDK/Runtime |
+|-----------|---------------|-------------|
+| `paketo-buildpacks/java` | Java, Spring Boot, Maven, Gradle | JDK 21+ (JDK 25 via `BP_JVM_VERSION=25`) |
+| `paketo-buildpacks/go` | Go | Aktuelle Go-Version |
+| `paketo-buildpacks/nodejs` | Node.js, npm, yarn | Aktuelle LTS |
+| `paketo-buildpacks/php` | PHP, Composer | Aktuelle PHP-Version |
+| `paketo-buildpacks/ruby` | Ruby, Bundler | Aktuelle Ruby-Version |
+| `paketo-buildpacks/httpd` | Statische Dateien via Apache | Apache httpd |
+| `paketo-buildpacks/procfile` | Procfile-basierte Apps | Beliebig |
+
+**JDK-Version steuern (z.B. JDK 25):**
+
 ```yaml
-# kpack-config.yaml
-apiVersion: kpack.io/v1alpha2
-kind: ClusterStore
-metadata:
-  name: default
-spec:
-  sources:
-    - image: heroku/builder:24
----
-apiVersion: kpack.io/v1alpha2
-kind: ClusterStack
-metadata:
-  name: base
-spec:
-  id: "io.heroku.stacks.24"
-  buildImage:
-    image: heroku/heroku:24-cnb-build
-  runImage:
-    image: heroku/heroku:24-cnb
----
-apiVersion: kpack.io/v1alpha2
-kind: ClusterBuilder
-metadata:
-  name: default
-spec:
-  tag: artifactory.cfapps.cool/docker-local/korifi/kpack-builder
-  stack:
-    name: base
-    kind: ClusterStack
-  store:
-    name: default
-    kind: ClusterStore
-  order:
-    - group:
-        - id: heroku/go
-        - id: heroku/java
-        - id: heroku/nodejs
-        - id: heroku/python
-        - id: heroku/ruby
-        - id: heroku/php
-  serviceAccountRef:
-    name: kpack-service-account
-    namespace: cf
+# In manifest.yml:
+env:
+  BP_JVM_VERSION: "25"
 ```
 
 ```bash
-kubectl apply -f kpack-config.yaml
-
 # ClusterBuilder Status pruefen (kann einige Minuten dauern wegen Image-Pull)
-kubectl get clusterbuilder default
+kubectl get clusterbuilder cf-kpack-cluster-builder -o wide
 # READY: True
 ```
 
-> **Hinweis:** Der erste Build des ClusterBuilders dauert unter QEMU Emulation deutlich laenger (5-15 Minuten). Dies ist normal.
+> **Hinweis:** Der erste Build des ClusterBuilders dauert unter QEMU Emulation deutlich laenger (5-15 Minuten). Dies ist normal. Nach jeder Aenderung am ClusterStore oder ClusterBuilder wird das Builder-Image neu erstellt.
 
 ---
 
