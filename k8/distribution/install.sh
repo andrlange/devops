@@ -1098,11 +1098,47 @@ install_phase_6() {
 
   # --- Install kpack ---
   if ! component_is_installed "phase6_kpack" "$STATE_FILE"; then
-    log_step "Installing kpack..."
+    log_step "Installing kpack v0.17.0..."
     kubectl apply -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.0/release-0.17.0.yaml 2>&1 | tail -3
     wait_for_pods "kpack" 120
     log_success "kpack installed"
     mark_component_installed "phase6_kpack" "$STATE_FILE"
+  fi
+
+  # --- Patch kpack with ARM64 images ---
+  if ! component_is_installed "phase6_kpack_arm64" "$STATE_FILE"; then
+    log_step "Patching kpack with ARM64 images (native, no QEMU)..."
+    local KPACK_TAG="0.17.0-arm64"
+    local KPACK_REGISTRY="${REGISTRY:-artifactory.cfapps.cool}/docker-local"
+
+    # Check if ARM64 images exist in registry
+    if crane manifest "${KPACK_REGISTRY}/kpack/controller:${KPACK_TAG}" &>/dev/null; then
+      # Patch controller and webhook deployments
+      kubectl set image -n kpack deploy/kpack-controller \
+        "controller=${KPACK_REGISTRY}/kpack/controller:${KPACK_TAG}" 2>&1 | tail -1
+      kubectl set image -n kpack deploy/kpack-webhook \
+        "webhook=${KPACK_REGISTRY}/kpack/webhook:${KPACK_TAG}" 2>&1 | tail -1
+
+      # Patch build helper image references
+      kubectl set env -n kpack deploy/kpack-controller \
+        "BUILD_INIT_IMAGE=${KPACK_REGISTRY}/kpack/build-init:${KPACK_TAG}" \
+        "BUILD_WAITER_IMAGE=${KPACK_REGISTRY}/kpack/build-waiter:${KPACK_TAG}" \
+        "REBASE_IMAGE=${KPACK_REGISTRY}/kpack/rebase:${KPACK_TAG}" \
+        "COMPLETION_IMAGE=${KPACK_REGISTRY}/kpack/completion:${KPACK_TAG}" 2>&1 | tail -1
+
+      # Force re-pull to replace cached AMD64 images
+      kubectl patch deploy kpack-controller -n kpack \
+        -p '{"spec":{"template":{"spec":{"containers":[{"name":"controller","imagePullPolicy":"Always"}]}}}}' 2>&1 | tail -1
+      kubectl patch deploy kpack-webhook -n kpack \
+        -p '{"spec":{"template":{"spec":{"containers":[{"name":"webhook","imagePullPolicy":"Always"}]}}}}' 2>&1 | tail -1
+
+      wait_for_pods "kpack" 120
+      log_success "kpack patched with ARM64 images"
+    else
+      log_warn "ARM64 images not found in registry — build them first with k8/services/kpack/build-arm64.sh"
+      log_warn "kpack will run under QEMU emulation (unstable)"
+    fi
+    mark_component_installed "phase6_kpack_arm64" "$STATE_FILE"
   fi
 
   # --- Install Service Binding Runtime ---
