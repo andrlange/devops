@@ -1,0 +1,8 @@
+applications:
+- name: html-demo
+  memory: 64M
+  instances: 1
+  routes:
+  - route: html-demo.app.cfapps.cool
+  buildpacks:
+  - paketo-buildpacks/httpd
