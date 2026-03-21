@@ -609,6 +609,91 @@ print_endpoints_with_check() {
 }
 
 # ---------------------------------------------------------------------------
+# Renew Certificates
+# ---------------------------------------------------------------------------
+cmd_renewcerts() {
+    header "Renewing TLS Certificates"
+
+    local certs
+    certs=$(kubectl get certificates -A -o json 2>/dev/null)
+    local count
+    count=$(echo "$certs" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('items',[])))" 2>/dev/null || echo "0")
+
+    if [[ "$count" -eq 0 ]]; then
+        warn "No certificates found"
+        return
+    fi
+
+    info "Found ${count} certificate(s)"
+    echo
+
+    # Show current certificate status
+    printf "  ${BOLD}%-40s %-10s %-12s %s${NC}\n" "CERTIFICATE" "NAMESPACE" "READY" "EXPIRY"
+    echo "$certs" | python3 -c "
+import json, sys
+certs = json.load(sys.stdin).get('items', [])
+for c in certs:
+    name = c['metadata']['name']
+    ns = c['metadata']['namespace']
+    ready = 'Unknown'
+    for cond in c.get('status', {}).get('conditions', []):
+        if cond['type'] == 'Ready':
+            ready = cond['status']
+    expiry = c.get('status', {}).get('notAfter', 'n/a')
+    print(f'  {name:40s} {ns:10s} {ready:12s} {expiry}')
+"
+    echo
+
+    # Trigger renewal by deleting the secrets — cert-manager will re-issue
+    info "Triggering renewal..."
+    echo "$certs" | python3 -c "
+import json, sys
+certs = json.load(sys.stdin).get('items', [])
+for c in certs:
+    ns = c['metadata']['namespace']
+    secret = c['spec'].get('secretName', '')
+    if secret:
+        print(f'{ns}/{secret}')
+" | while IFS='/' read -r ns secret; do
+        kubectl delete secret "$secret" -n "$ns" 2>/dev/null && \
+            ok "  Deleted ${ns}/${secret} — cert-manager will re-issue" || \
+            warn "  Could not delete ${ns}/${secret}"
+    done
+
+    echo
+    info "Waiting for certificates to be re-issued..."
+    sleep 10
+
+    # Check status after renewal
+    local all_ready=true
+    kubectl get certificates -A --no-headers 2>/dev/null | while read -r ns name ready secret age; do
+        if [[ "$ready" == "True" ]]; then
+            ok "  ${ns}/${name}: Ready"
+        else
+            warn "  ${ns}/${name}: ${ready} (may still be issuing)"
+            all_ready=false
+        fi
+    done
+
+    echo
+    # Verify reflected secrets are updated
+    if kubectl get secret wildcard-apps-tls -n korifi &>/dev/null; then
+        local issuer
+        issuer=$(kubectl get secret wildcard-apps-tls -n korifi -o jsonpath='{.data.tls\.crt}' | \
+            base64 -d | openssl x509 -noout -issuer 2>/dev/null | sed 's/issuer= //')
+        if [[ "$issuer" == *"Let's Encrypt"* ]]; then
+            ok "Reflected cert in korifi namespace: ${issuer}"
+        else
+            warn "Reflected cert issuer: ${issuer}"
+        fi
+    fi
+
+    echo
+    ok "Certificate renewal triggered"
+    info "Run './stack.sh status' to verify all endpoints"
+}
+
+# ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
 usage() {
@@ -623,6 +708,7 @@ Commands:
   status      Show cluster and service status
   restart     Stop then start the stack
   backup      Create a Velero backup
+  renewcerts  Force renewal of all TLS certificates
 
 Options:
   --backup    (stop only) Run a Velero backup before stopping
@@ -645,11 +731,12 @@ main() {
     shift || true
 
     case "$command" in
-        start)   cmd_start ;;
-        stop)    cmd_stop "$@" ;;
-        status)  cmd_status ;;
-        restart) cmd_restart "$@" ;;
-        backup)  cmd_backup ;;
+        start)      cmd_start ;;
+        stop)       cmd_stop "$@" ;;
+        status)     cmd_status ;;
+        restart)    cmd_restart "$@" ;;
+        backup)     cmd_backup ;;
+        renewcerts) cmd_renewcerts ;;
         -h|--help|help)
             usage ;;
         "")
