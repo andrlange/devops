@@ -807,11 +807,11 @@ cmd_extenddisk() {
 # ---------------------------------------------------------------------------
 # Change Memory
 # ---------------------------------------------------------------------------
-cmd_extendmem() {
+cmd_extendram() {
     local new_size="${1:-}"
     if [[ -z "$new_size" ]]; then
-        err "Usage: $(basename "$0") extendmem <size-in-gb>"
-        err "Example: $(basename "$0") extendmem 32"
+        err "Usage: $(basename "$0") extendram <size-in-gb>"
+        err "Example: $(basename "$0") extendram 32"
         exit 1
     fi
 
@@ -886,7 +886,7 @@ Commands:
   backup       Create a Velero backup
   renewcerts   Force renewal of all TLS certificates
   extenddisk   Extend VM disk size (e.g. extenddisk 300)
-  extendmem    Change VM memory in GB (e.g. extendmem 32)
+  extendram    Change VM memory in GB (e.g. extendram 32)
 
 Options:
   --backup    (stop only) Run a Velero backup before stopping
@@ -917,7 +917,7 @@ main() {
         backup)     cmd_backup ;;
         renewcerts) cmd_renewcerts ;;
         extenddisk) cmd_extenddisk "$@" ;;
-        extendmem)  cmd_extendmem "$@" ;;
+        extendram)  cmd_extendram "$@" ;;
         -h|--help|help)
             usage ;;
         "")
