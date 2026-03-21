@@ -1150,27 +1150,137 @@ install_phase_6() {
     mark_component_installed "phase6_servicebinding" "$STATE_FILE"
   fi
 
+  # --- Setup local registry for Korifi ---
+  if ! component_is_installed "phase6_local_registry" "$STATE_FILE"; then
+    log_step "Setting up local registry for Korifi builds..."
+    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+    local LOCAL_AK="https://artifacts.${LOCAL_REGISTRY}"
+
+    # Get admin credentials from OpenBao
+    local AK_ADMIN_PASS
+    AK_ADMIN_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get -field=admin_password secret/artifact-keeper/app 2>/dev/null)
+
+    # Login to get token
+    local AK_TOKEN
+    AK_TOKEN=$(curl -sk "${LOCAL_AK}/api/v1/auth/login" \
+      -H "Content-Type: application/json" \
+      -d "{\"username\":\"admin\",\"password\":\"${AK_ADMIN_PASS}\"}" | \
+      python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])" 2>/dev/null)
+
+    # Create korifi Docker repo (idempotent — ignore if exists)
+    curl -sk "${LOCAL_AK}/api/v1/repositories" \
+      -H "Authorization: Bearer ${AK_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d '{"key":"korifi","name":"Korifi Container Images","format":"docker","repo_type":"local","is_public":true}' 2>&1 | tail -1
+
+    # Ensure repo is public (for kpack pull access)
+    local REPO_ID
+    REPO_ID=$(curl -sk "${LOCAL_AK}/api/v1/repositories/korifi" \
+      -H "Authorization: Bearer ${AK_TOKEN}" 2>/dev/null | \
+      python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+    if [ -n "$REPO_ID" ]; then
+      curl -sk -X PATCH "${LOCAL_AK}/api/v1/repositories/korifi" \
+        -H "Authorization: Bearer ${AK_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d '{"is_public":true}' 2>&1 | tail -1
+    fi
+
+    # Store korifi registry credentials in OpenBao
+    kubectl exec -n openbao openbao-0 -- bao kv put secret/korifi/registry \
+      username="admin" password="${AK_ADMIN_PASS}" \
+      registry="artifacts.${LOCAL_REGISTRY}" repo="korifi" 2>&1 | tail -1
+
+    log_success "Local registry configured (artifacts.${LOCAL_REGISTRY}/korifi)"
+    mark_component_installed "phase6_local_registry" "$STATE_FILE"
+  fi
+
   # --- Create CF namespaces and registry credentials ---
   if ! component_is_installed "phase6_namespaces" "$STATE_FILE"; then
     log_step "Creating CF namespaces..."
+    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-development.cfapps.cool}"
     ensure_namespace "cf"
     ensure_namespace "korifi"
     ensure_namespace "korifi-gateway"
 
-    # Registry credentials for kpack builds
+    # Get admin credentials from OpenBao for local registry
+    local AK_ADMIN_PASS
+    AK_ADMIN_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get -field=admin_password secret/artifact-keeper/app 2>/dev/null)
+
+    # Registry credentials for kpack builds (cf namespace)
     kubectl -n cf create secret docker-registry image-registry-credentials \
-      --docker-server="${REGISTRY:-artifactory.cfapps.cool}" \
-      --docker-username="${REGISTRY_USER:-dev}" \
-      --docker-password="${REGISTRY_PASS:-}" \
+      --docker-server="artifacts.${LOCAL_REGISTRY}" \
+      --docker-username="admin" \
+      --docker-password="${AK_ADMIN_PASS}" \
       --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -1
+
+    # Registry credentials for kpack controller (kpack namespace)
+    local AUTH_B64
+    AUTH_B64=$(echo -n "admin:${AK_ADMIN_PASS}" | base64)
+    kubectl create secret generic kpack-registry-auth \
+      --from-literal=config.json="{\"auths\":{\"artifacts.${LOCAL_REGISTRY}\":{\"username\":\"admin\",\"password\":\"${AK_ADMIN_PASS}\",\"auth\":\"${AUTH_B64}\"}}}" \
+      -n kpack --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -1
+
+    # Mount registry auth into kpack controller
+    kubectl get deploy kpack-controller -n kpack -o json | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+c = d['spec']['template']['spec']['containers'][0]
+# Add DOCKER_CONFIG env var
+envs = [e for e in c.get('env', []) if e['name'] != 'DOCKER_CONFIG']
+envs.append({'name': 'DOCKER_CONFIG', 'value': '/home/nonroot/.docker'})
+c['env'] = envs
+# Add volume mount
+vms = [vm for vm in c.get('volumeMounts', []) if vm['mountPath'] != '/home/nonroot/.docker']
+vms.append({'name': 'registry-auth', 'mountPath': '/home/nonroot/.docker', 'readOnly': True})
+c['volumeMounts'] = vms
+# Add volume
+vols = d['spec']['template']['spec'].get('volumes', [])
+vols = [v for v in vols if v['name'] != 'registry-auth']
+vols.append({'name': 'registry-auth', 'secret': {'secretName': 'kpack-registry-auth'}})
+d['spec']['template']['spec']['volumes'] = vols
+json.dump(d, sys.stdout)
+" | kubectl apply -f - 2>&1 | tail -1
 
     log_success "CF namespaces and credentials created"
     mark_component_installed "phase6_namespaces" "$STATE_FILE"
   fi
 
+  # --- Mirror buildpack images to local registry ---
+  if ! component_is_installed "phase6_mirror_buildpacks" "$STATE_FILE"; then
+    log_step "Mirroring buildpack images to local registry..."
+    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+    local LOCAL_PREFIX="artifacts.${LOCAL_REGISTRY}/korifi"
+
+    if command -v crane &>/dev/null; then
+      local AK_ADMIN_PASS
+      AK_ADMIN_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get -field=admin_password secret/artifact-keeper/app 2>/dev/null)
+      crane auth login "artifacts.${LOCAL_REGISTRY}" -u admin -p "${AK_ADMIN_PASS}" 2>/dev/null
+
+      # Mirror buildpacks
+      for bp in java nodejs ruby procfile go php httpd; do
+        crane cp "paketobuildpacks/${bp}:latest" "${LOCAL_PREFIX}/buildpacks/${bp}:latest" 2>/dev/null && \
+          log_success "  Mirrored ${bp}" || log_warn "  Failed to mirror ${bp}"
+      done
+
+      # Mirror stack images
+      crane cp "paketobuildpacks/build-jammy-full:latest" "${LOCAL_PREFIX}/stacks/build-jammy-full:latest" 2>/dev/null && \
+        log_success "  Mirrored build-jammy-full" || log_warn "  Failed to mirror build-jammy-full"
+      crane cp "paketobuildpacks/run-jammy-full:latest" "${LOCAL_PREFIX}/stacks/run-jammy-full:latest" 2>/dev/null && \
+        log_success "  Mirrored run-jammy-full" || log_warn "  Failed to mirror run-jammy-full"
+
+      log_success "Buildpack images mirrored to local registry"
+    else
+      log_warn "crane not found — skipping mirror. Install: go install github.com/google/go-containerregistry/cmd/crane@latest"
+      log_warn "Run k8/services/kpack/mirror-buildpacks.sh manually after installing crane"
+    fi
+    mark_component_installed "phase6_mirror_buildpacks" "$STATE_FILE"
+  fi
+
   # --- Install Korifi ---
   if ! component_is_installed "phase6_korifi" "$STATE_FILE"; then
     log_step "Installing Korifi v0.18.0..."
+    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+    local LOCAL_PREFIX="artifacts.${LOCAL_REGISTRY}/korifi"
     helm install korifi \
       https://github.com/cloudfoundry/korifi/releases/download/v0.18.0/korifi-0.18.0.tgz \
       --namespace="korifi" \
@@ -1179,8 +1289,8 @@ install_phase_6() {
       --set=adminUserName="cf-admin" \
       --set=api.apiServer.url="api.${CF_DOMAIN}" \
       --set=defaultAppDomainName="${CF_DOMAIN}" \
-      --set=containerRepositoryPrefix="${REGISTRY:-artifactory.cfapps.cool}/docker-local/korifi/" \
-      --set=kpackImageBuilder.builderRepository="${REGISTRY:-artifactory.cfapps.cool}/docker-local/korifi/kpack-builder" \
+      --set=containerRepositoryPrefix="${LOCAL_PREFIX}/" \
+      --set=kpackImageBuilder.builderRepository="${LOCAL_PREFIX}/kpack-builder" \
       --set=networking.gatewayClass="contour" \
       --set=networking.gatewayNamespace="korifi-gateway" \
       --set=experimental.managedServices.enabled=true \
@@ -1192,27 +1302,29 @@ install_phase_6() {
     mark_component_installed "phase6_korifi" "$STATE_FILE"
   fi
 
-  # --- Configure Buildpacks ---
+  # --- Configure Buildpacks (local images) ---
   if ! component_is_installed "phase6_buildpacks" "$STATE_FILE"; then
     log_step "Configuring buildpacks (Java, Go, Node.js, PHP, Ruby, httpd, procfile)..."
+    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+    local LOCAL_PREFIX="artifacts.${LOCAL_REGISTRY}/korifi"
 
-    # Add all buildpack images to ClusterStore
+    # Set ClusterStore to local buildpack images
     kubectl get clusterstore cf-default-buildpacks -o json | python3 -c "
 import json, sys
 cs = json.load(sys.stdin)
-existing = {s['image'] for s in cs['spec']['sources']}
-needed = [
-    'paketobuildpacks/java',
-    'paketobuildpacks/go',
-    'paketobuildpacks/nodejs',
-    'paketobuildpacks/php',
-    'paketobuildpacks/ruby',
-    'paketobuildpacks/httpd',
-    'paketobuildpacks/procfile',
-]
-for bp in needed:
-    if bp not in existing:
-        cs['spec']['sources'].append({'image': bp})
+prefix = '${LOCAL_PREFIX}'
+bps = ['java','nodejs','ruby','procfile','go','php','httpd']
+cs['spec']['sources'] = [{'image': f'{prefix}/buildpacks/{bp}:latest'} for bp in bps]
+json.dump(cs, sys.stdout)
+" | kubectl apply -f - 2>&1 | tail -1
+
+    # Set ClusterStack to local stack images
+    kubectl get clusterstack cf-default-stack -o json | python3 -c "
+import json, sys
+cs = json.load(sys.stdin)
+prefix = '${LOCAL_PREFIX}'
+cs['spec']['buildImage']['image'] = f'{prefix}/stacks/build-jammy-full:latest'
+cs['spec']['runImage']['image'] = f'{prefix}/stacks/run-jammy-full:latest'
 json.dump(cs, sys.stdout)
 " | kubectl apply -f - 2>&1 | tail -1
 
@@ -1236,7 +1348,7 @@ for bp in needed:
 json.dump(cb, sys.stdout)
 " | kubectl apply -f - 2>&1 | tail -1
 
-    log_success "Buildpacks configured (builder image rebuild may take 5-10 min under QEMU)"
+    log_success "Buildpacks configured with local images"
     mark_component_installed "phase6_buildpacks" "$STATE_FILE"
   fi
 
