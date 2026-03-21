@@ -805,6 +805,71 @@ cmd_extenddisk() {
 }
 
 # ---------------------------------------------------------------------------
+# Change Memory
+# ---------------------------------------------------------------------------
+cmd_extendmem() {
+    local new_size="${1:-}"
+    if [[ -z "$new_size" ]]; then
+        err "Usage: $(basename "$0") extendmem <size-in-gb>"
+        err "Example: $(basename "$0") extendmem 32"
+        exit 1
+    fi
+
+    if ! [[ "$new_size" =~ ^[0-9]+$ ]]; then
+        err "Size must be a number (in GB), got: ${new_size}"
+        exit 1
+    fi
+
+    if [[ "$new_size" -lt 8 ]]; then
+        err "Minimum memory is 8GB"
+        exit 1
+    fi
+
+    local lima_yaml="${HOME}/.lima/${LIMA_VM_NAME}/lima.yaml"
+    if [[ ! -f "$lima_yaml" ]]; then
+        err "Lima config not found: ${lima_yaml}"
+        exit 1
+    fi
+
+    local current_size
+    current_size=$(grep '^memory:' "$lima_yaml" | head -1 | sed 's/memory: *//;s/GiB//')
+    if [[ -z "$current_size" ]]; then
+        err "Could not determine current memory from ${lima_yaml}"
+        exit 1
+    fi
+
+    if [[ "$new_size" -eq "$current_size" ]]; then
+        info "Memory is already ${current_size}GB"
+        return 0
+    fi
+
+    header "Changing VM Memory"
+    info "Current: ${current_size}GB"
+    info "New:     ${new_size}GB"
+    echo
+
+    local needs_restart=false
+    if vm_is_running; then
+        warn "VM must be stopped to change memory"
+        info "Stopping VM..."
+        limactl stop "$LIMA_VM_NAME" 2>&1 | tail -1
+        needs_restart=true
+    fi
+
+    sed -i '' "s/^memory: .*GiB/memory: ${new_size}GiB/" "$lima_yaml"
+    ok "Updated ${lima_yaml}: memory: ${new_size}GiB"
+
+    info "Starting VM with ${new_size}GB memory..."
+    limactl start "$LIMA_VM_NAME" 2>&1 | tail -3
+    ok "VM started with ${new_size}GB memory"
+
+    if [[ "$needs_restart" == "true" ]]; then
+        echo
+        info "Run './stack.sh start' to bring the full stack back up"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
 usage() {
@@ -821,6 +886,7 @@ Commands:
   backup       Create a Velero backup
   renewcerts   Force renewal of all TLS certificates
   extenddisk   Extend VM disk size (e.g. extenddisk 300)
+  extendmem    Change VM memory in GB (e.g. extendmem 32)
 
 Options:
   --backup    (stop only) Run a Velero backup before stopping
@@ -851,6 +917,7 @@ main() {
         backup)     cmd_backup ;;
         renewcerts) cmd_renewcerts ;;
         extenddisk) cmd_extenddisk "$@" ;;
+        extendmem)  cmd_extendmem "$@" ;;
         -h|--help|help)
             usage ;;
         "")
