@@ -444,47 +444,162 @@ helm install korifi korifi/korifi \
   --set api.authProxy.enabled=false
 ```
 
+### Contour Gateway API aktivieren
+
+Nach der Contour-Installation muss die ConfigMap gepatcht werden, damit Contour das von Korifi erstellte Gateway-Objekt erkennt. Ohne diesen Schritt bleibt das Gateway im Status `Pending` und die CF API ist nicht erreichbar.
+
+```bash
+# Contour ConfigMap patchen: Gateway-Referenz auf korifi-gateway/korifi setzen
+kubectl get configmap contour -n projectcontour -o json | \
+  python3 -c "
+import json, sys
+cm = json.load(sys.stdin)
+old = cm['data']['contour.yaml']
+new = old.replace(
+    '# Specify the Gateway API configuration.\n# gateway:\n#   namespace: projectcontour\n#   name: contour',
+    'gateway:\n  gatewayRef:\n    namespace: korifi-gateway\n    name: korifi'
+)
+cm['data']['contour.yaml'] = new
+json.dump(cm, sys.stdout)
+" | kubectl apply -f -
+
+# Contour neu starten damit die Aenderung wirksam wird
+kubectl rollout restart deploy/contour -n projectcontour
+kubectl rollout status deploy/contour -n projectcontour --timeout=60s
+```
+
+Falls Contour nach dem Neustart mit `no matches for kind "BackendTLSPolicy" in version "gateway.networking.k8s.io/v1alpha3"` crasht, muss die CRD-Version als served aktiviert werden:
+
+```bash
+# BackendTLSPolicy v1alpha3 als served aktivieren (Contour v1.33.x benoetigt dies)
+kubectl get crd backendtlspolicies.gateway.networking.k8s.io -o json | \
+  python3 -c "
+import json, sys
+crd = json.load(sys.stdin)
+for v in crd['spec']['versions']:
+    if v['name'] == 'v1alpha3':
+        v['served'] = True
+json.dump(crd, sys.stdout)
+" | kubectl apply -f -
+
+# Contour erneut neu starten
+kubectl rollout restart deploy/contour -n projectcontour
+kubectl rollout status deploy/contour -n projectcontour --timeout=60s
+```
+
+**Validierung:**
+
+```bash
+# Gateway muss PROGRAMMED=True und eine ADDRESS haben
+kubectl get gateway korifi -n korifi-gateway
+# NAME     CLASS     ADDRESS          PROGRAMMED   AGE
+# korifi   contour   192.168.64.203   True         ...
+
+# CF API muss erreichbar sein
+curl -sk https://api.app.cfapps.cool/v3/info | python3 -m json.tool
+```
+
 ### Admin User konfigurieren
 
-Korifi nutzt Kubernetes RBAC fuer die Authentifizierung. Ein Admin-User wird ueber ein ServiceAccount Token erstellt.
+Korifi nutzt Kubernetes RBAC fuer die Authentifizierung. Der `adminUserName` in der Helm-Konfiguration referenziert einen K8s-User (CN im Zertifikat). Die Authentifizierung erfolgt ueber ein vom K8s API-Server signiertes Client-Zertifikat.
 
-```yaml
-# cf-admin.yaml
-apiVersion: v1
-kind: ServiceAccount
+#### Schritt 1: Zertifikat erstellen
+
+```bash
+# Private Key generieren
+openssl genrsa -out ~/.kube/cf-admin.key 4096
+
+# Certificate Signing Request (CSR) erstellen
+# CN=cf-admin muss mit adminUserName in der Helm-Config uebereinstimmen
+openssl req -new -key ~/.kube/cf-admin.key -out /tmp/cf-admin.csr -subj "/CN=cf-admin"
+```
+
+#### Schritt 2: CSR bei Kubernetes einreichen und genehmigen
+
+```bash
+# CSR als K8s-Ressource erstellen
+CSR_B64=$(cat /tmp/cf-admin.csr | base64 | tr -d '\n')
+cat <<EOF | kubectl apply -f -
+apiVersion: certificates.k8s.io/v1
+kind: CertificateSigningRequest
 metadata:
   name: cf-admin
-  namespace: cf
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: cf-admin-token
-  namespace: cf
-  annotations:
-    kubernetes.io/service-account.name: cf-admin
-type: kubernetes.io/service-account-token
----
+spec:
+  request: ${CSR_B64}
+  signerName: kubernetes.io/kube-apiserver-client
+  expirationSeconds: 31536000
+  usages:
+  - client auth
+EOF
+
+# CSR genehmigen
+kubectl certificate approve cf-admin
+
+# Signiertes Zertifikat extrahieren
+kubectl get csr cf-admin -o jsonpath='{.status.certificate}' | base64 -d > ~/.kube/cf-admin.crt
+
+# Zertifikat pruefen
+openssl x509 -in ~/.kube/cf-admin.crt -noout -subject -enddate
+# subject= /CN=cf-admin
+# notAfter=Mar 21 ... 2027 GMT
+```
+
+#### Schritt 3: ClusterRoleBinding erstellen
+
+Die Helm-Installation erstellt nur ein RoleBinding im `cf` Root-Namespace. Fuer vollen Admin-Zugriff (Orgs/Spaces erstellen, Apps deployen) wird ein ClusterRoleBinding benoetigt:
+
+```bash
+cat <<'EOF' | kubectl apply -f -
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: cf-admin
+  name: cf-admin-binding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: korifi-controllers-admin
 subjects:
-  - kind: ServiceAccount
-    name: cf-admin
-    namespace: cf
+- apiGroup: rbac.authorization.k8s.io
+  kind: User
+  name: cf-admin
+EOF
 ```
 
-```bash
-kubectl apply -f cf-admin.yaml
+#### Schritt 4: Kubeconfig fuer cf-admin erstellen
 
-# Token auslesen
-CF_ADMIN_TOKEN=$(kubectl get secret cf-admin-token -n cf -o jsonpath='{.data.token}' | base64 -d)
-echo "$CF_ADMIN_TOKEN"
+```bash
+# Cluster-Infos aus bestehender Kubeconfig uebernehmen
+CLUSTER_SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+CLUSTER_CA=$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
+
+# Separate Kubeconfig fuer cf-admin
+kubectl config set-cluster k3s-cf \
+  --server="${CLUSTER_SERVER}" \
+  --certificate-authority=<(echo "${CLUSTER_CA}" | base64 -d) \
+  --embed-certs=true \
+  --kubeconfig=~/.kube/cf-admin-kubeconfig
+
+kubectl config set-credentials cf-admin \
+  --client-certificate=~/.kube/cf-admin.crt \
+  --client-key=~/.kube/cf-admin.key \
+  --embed-certs=true \
+  --kubeconfig=~/.kube/cf-admin-kubeconfig
+
+kubectl config set-context cf-admin \
+  --cluster=k3s-cf \
+  --user=cf-admin \
+  --kubeconfig=~/.kube/cf-admin-kubeconfig
+
+kubectl config use-context cf-admin \
+  --kubeconfig=~/.kube/cf-admin-kubeconfig
+```
+
+#### Schritt 5: Berechtigungen validieren
+
+```bash
+# cf-admin muss Korifi-Ressourcen verwalten koennen
+kubectl --kubeconfig=~/.kube/cf-admin-kubeconfig auth can-i list cforgs.korifi.cloudfoundry.org --all-namespaces
+# yes
 ```
 
 ### CF API Login testen
@@ -493,11 +608,18 @@ echo "$CF_ADMIN_TOKEN"
 # API Endpunkt setzen
 cf api https://api.app.cfapps.cool --skip-ssl-validation
 
-# Login mit Token
-cf auth "$CF_ADMIN_TOKEN"
+# Login mit cf-admin Kubeconfig (waehlt automatisch cf-admin Credentials)
+KUBECONFIG=~/.kube/cf-admin-kubeconfig cf login
+# Waehle "1. cf-admin" wenn aufgefordert
 
-# Alternativ: kubeconfig-basierter Login
-# cf login (nutzt den aktuellen kubeconfig Kontext)
+# Alternativ nicht-interaktiv (fuer Skripte):
+echo "1" | KUBECONFIG=~/.kube/cf-admin-kubeconfig cf login
+
+# Erste Org und Space erstellen
+KUBECONFIG=~/.kube/cf-admin-kubeconfig cf create-org dev
+KUBECONFIG=~/.kube/cf-admin-kubeconfig cf target -o dev
+KUBECONFIG=~/.kube/cf-admin-kubeconfig cf create-space test
+KUBECONFIG=~/.kube/cf-admin-kubeconfig cf target -s test
 ```
 
 ### Validierung
@@ -864,6 +986,33 @@ Folgende Punkte muessen nach der Installation geprueft werden:
 - [ ] `cf bind-service my-test-app my-pg` -- Binding injiziert Credentials in VCAP_SERVICES
 - [ ] `cf logs my-test-app --recent` -- Logs sind abrufbar
 - [ ] `cf scale my-test-app -i 2` -- Skalierung funktioniert
+
+---
+
+## Web UI / Dashboard
+
+### Stratos (nicht kompatibel)
+
+[Stratos](https://github.com/cloudfoundry/stratos) ist die klassische Cloud Foundry Web-UI. Sie ist jedoch **nicht mit Korifi kompatibel:**
+
+- Stratos nutzt intensiv die **CF V2 API**, die Korifi nicht implementiert
+- Selbst die V3 API-Abdeckung von Stratos und Korifi ueberlappt nur teilweise
+- Ergebnis waere eine grossteils defekte UI mit vielen fehlenden Features
+
+**ARM64 Images** sind zwar inzwischen via GHCR verfuegbar (`ghcr.io/cloudfoundry/stratos-ui`, `ghcr.io/cloudfoundry/stratos-backend`), aber die Inkompatibilitaet mit Korifi macht einen Einsatz sinnlos.
+
+### Empfohlene Werkzeuge
+
+Fuer ein Korifi-basiertes Setup sind folgende Werkzeuge die richtige Wahl:
+
+| Werkzeug      | Zweck                                              | Status          |
+|---------------|-----------------------------------------------------|-----------------|
+| `cf` CLI      | Primaeres Developer-Interface (cf push, cf apps)   | Installiert     |
+| Portainer     | K8s-Ressourcen visualisieren (Apps = StatefulSets)  | Bereits deployt |
+| Grafana       | Monitoring-Dashboards fuer CF-Apps und Builds       | Bereits deployt |
+| `kubectl`/k9s | Cluster-Level Debugging und Troubleshooting        | Verfuegbar      |
+
+> **Hinweis:** Sobald Korifi 1.0 erreicht und die V3 API vollstaendig implementiert ist, koennte Stratos oder ein dediziertes Korifi-UI-Projekt eine Option werden. Stand v0.18.0 existiert kein kompatibles Web-UI.
 
 ---
 

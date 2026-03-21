@@ -1156,17 +1156,161 @@ install_phase_6() {
     mark_component_installed "phase6_korifi" "$STATE_FILE"
   fi
 
+  # --- Patch Contour Gateway API config ---
+  if ! component_is_installed "phase6_contour_gateway" "$STATE_FILE"; then
+    log_step "Patching Contour ConfigMap for Gateway API..."
+
+    # Enable BackendTLSPolicy v1alpha3 (required by Contour v1.33.x)
+    local btlsp_served
+    btlsp_served=$(kubectl get crd backendtlspolicies.gateway.networking.k8s.io -o json 2>/dev/null | \
+      python3 -c "import json,sys; crd=json.load(sys.stdin); print(next((str(v.get('served')) for v in crd['spec']['versions'] if v['name']=='v1alpha3'),'missing'))" 2>/dev/null || echo "missing")
+    if [ "$btlsp_served" = "False" ]; then
+      kubectl get crd backendtlspolicies.gateway.networking.k8s.io -o json | \
+        python3 -c "
+import json, sys
+crd = json.load(sys.stdin)
+for v in crd['spec']['versions']:
+    if v['name'] == 'v1alpha3':
+        v['served'] = True
+json.dump(crd, sys.stdout)
+" | kubectl apply -f - 2>&1 | tail -1
+      log_success "BackendTLSPolicy v1alpha3 enabled"
+    fi
+
+    # Patch Contour ConfigMap to reference korifi gateway
+    kubectl get configmap contour -n projectcontour -o json | \
+      python3 -c "
+import json, sys
+cm = json.load(sys.stdin)
+old = cm['data']['contour.yaml']
+new = old.replace(
+    '# Specify the Gateway API configuration.\n# gateway:\n#   namespace: projectcontour\n#   name: contour',
+    'gateway:\n  gatewayRef:\n    namespace: korifi-gateway\n    name: korifi'
+)
+cm['data']['contour.yaml'] = new
+json.dump(cm, sys.stdout)
+" | kubectl apply -f - 2>&1 | tail -1
+
+    # Restart Contour to apply changes
+    kubectl rollout restart deploy/contour -n projectcontour 2>&1 | tail -1
+    kubectl rollout status deploy/contour -n projectcontour --timeout=120s 2>&1 | tail -1
+
+    # Verify gateway is programmed
+    local gw_status
+    gw_status=$(kubectl get gateway korifi -n korifi-gateway -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null || echo "Unknown")
+    if [ "$gw_status" = "True" ]; then
+      log_success "Contour Gateway API configured (PROGRAMMED=True)"
+    else
+      log_warn "Gateway status: $gw_status — may need manual investigation"
+    fi
+    mark_component_installed "phase6_contour_gateway" "$STATE_FILE"
+  fi
+
+  # --- Create cf-admin credentials ---
+  if ! component_is_installed "phase6_cf_admin" "$STATE_FILE"; then
+    log_step "Creating cf-admin user credentials..."
+    local CF_ADMIN_DIR="${HOME}/.kube"
+
+    # Generate private key
+    openssl genrsa -out "${CF_ADMIN_DIR}/cf-admin.key" 4096 2>/dev/null
+
+    # Generate CSR
+    openssl req -new -key "${CF_ADMIN_DIR}/cf-admin.key" -out /tmp/cf-admin.csr -subj "/CN=cf-admin" 2>/dev/null
+
+    # Delete existing CSR if present (re-run safety)
+    kubectl delete csr cf-admin 2>/dev/null || true
+
+    # Submit CSR to Kubernetes
+    local CSR_B64
+    CSR_B64=$(cat /tmp/cf-admin.csr | base64 | tr -d '\n')
+    cat <<CSREOF | kubectl apply -f -
+apiVersion: certificates.k8s.io/v1
+kind: CertificateSigningRequest
+metadata:
+  name: cf-admin
+spec:
+  request: ${CSR_B64}
+  signerName: kubernetes.io/kube-apiserver-client
+  expirationSeconds: 31536000
+  usages:
+  - client auth
+CSREOF
+
+    # Approve CSR
+    kubectl certificate approve cf-admin 2>&1 | tail -1
+
+    # Wait briefly for certificate to be issued
+    sleep 2
+
+    # Extract signed certificate
+    kubectl get csr cf-admin -o jsonpath='{.status.certificate}' | base64 -d > "${CF_ADMIN_DIR}/cf-admin.crt"
+
+    # Create ClusterRoleBinding
+    cat <<'CRBEOF' | kubectl apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cf-admin-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: korifi-controllers-admin
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: User
+  name: cf-admin
+CRBEOF
+
+    # Create cf-admin kubeconfig
+    local CLUSTER_SERVER CLUSTER_CA
+    CLUSTER_SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+    CLUSTER_CA=$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
+
+    kubectl config set-cluster k3s-cf \
+      --server="${CLUSTER_SERVER}" \
+      --certificate-authority=<(echo "${CLUSTER_CA}" | base64 -d) \
+      --embed-certs=true \
+      --kubeconfig="${CF_ADMIN_DIR}/cf-admin-kubeconfig" 2>/dev/null
+
+    kubectl config set-credentials cf-admin \
+      --client-certificate="${CF_ADMIN_DIR}/cf-admin.crt" \
+      --client-key="${CF_ADMIN_DIR}/cf-admin.key" \
+      --embed-certs=true \
+      --kubeconfig="${CF_ADMIN_DIR}/cf-admin-kubeconfig" 2>/dev/null
+
+    kubectl config set-context cf-admin \
+      --cluster=k3s-cf \
+      --user=cf-admin \
+      --kubeconfig="${CF_ADMIN_DIR}/cf-admin-kubeconfig" 2>/dev/null
+
+    kubectl config use-context cf-admin \
+      --kubeconfig="${CF_ADMIN_DIR}/cf-admin-kubeconfig" 2>/dev/null
+
+    # Verify permissions
+    local can_list
+    can_list=$(kubectl --kubeconfig="${CF_ADMIN_DIR}/cf-admin-kubeconfig" auth can-i list cforgs.korifi.cloudfoundry.org --all-namespaces 2>/dev/null || echo "no")
+    if [ "$can_list" = "yes" ]; then
+      log_success "cf-admin credentials created at ${CF_ADMIN_DIR}/cf-admin-kubeconfig"
+    else
+      log_warn "cf-admin credentials created but permission check failed"
+    fi
+
+    rm -f /tmp/cf-admin.csr
+    mark_component_installed "phase6_cf_admin" "$STATE_FILE"
+  fi
+
   mark_phase_complete 6 "$STATE_FILE"
   echo ""
   log_success "Phase 6 complete — Cloud Foundry (Korifi)"
   echo ""
   echo -e "  ${BOLD}CF API:${NC}     https://api.${CF_DOMAIN}"
   echo -e "  ${BOLD}App Domain:${NC} *.${CF_DOMAIN}"
+  echo -e "  ${BOLD}Kubeconfig:${NC} ~/.kube/cf-admin-kubeconfig"
   echo ""
   echo -e "  ${BOLD}Next steps:${NC}"
   echo -e "  brew install cloudfoundry/tap/cf-cli@8"
   echo -e "  cf api https://api.${CF_DOMAIN} --skip-ssl-validation"
-  echo -e "  cf login -u cf-admin"
+  echo -e "  KUBECONFIG=~/.kube/cf-admin-kubeconfig cf login"
   echo -e "  cf create-org dev && cf target -o dev"
   echo -e "  cf create-space test && cf target -s test"
   echo -e "  cf push my-app"
