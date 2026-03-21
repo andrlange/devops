@@ -1635,6 +1635,153 @@ CRBEOF
 }
 
 # =============================================================================
+# Phase 7 — CF Service Brokers
+# =============================================================================
+# CloudNativePG, RabbitMQ Operator, Universal OSBAPI Broker
+# =============================================================================
+install_phase_7() {
+  log_phase "Phase 7 — CF Service Brokers"
+  load_config
+  export KUBECONFIG="${HOME}/.kube/config-k3s"
+
+  # --- Install CloudNativePG operator ---
+  if ! component_is_installed "phase7_cnpg" "$STATE_FILE"; then
+    log_step "Installing CloudNativePG operator..."
+    helm repo add cnpg https://cloudnative-pg.github.io/charts 2>/dev/null || true
+    helm install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace 2>&1 | tail -1
+    wait_for_pods "cnpg-system" 120
+    log_success "CloudNativePG operator installed"
+    mark_component_installed "phase7_cnpg" "$STATE_FILE"
+  fi
+
+  # --- Install RabbitMQ Cluster Operator ---
+  if ! component_is_installed "phase7_rabbitmq_operator" "$STATE_FILE"; then
+    log_step "Installing RabbitMQ Cluster Operator..."
+    kubectl apply -f https://github.com/rabbitmq/cluster-operator/releases/latest/download/cluster-operator.yml 2>&1 | tail -3
+    wait_for_pods "rabbitmq-system" 120
+    log_success "RabbitMQ Cluster Operator installed"
+    mark_component_installed "phase7_rabbitmq_operator" "$STATE_FILE"
+  fi
+
+  # --- Create cf-services namespace ---
+  if ! component_is_installed "phase7_namespace" "$STATE_FILE"; then
+    log_step "Creating cf-services namespace..."
+    ensure_namespace "cf-services"
+
+    # Pull secret for broker image
+    kubectl -n cf-services create secret docker-registry artifact-keeper-pull \
+      --docker-server="${REGISTRY:-artifactory.cfapps.cool}" \
+      --docker-username="${REGISTRY_USER:-admin}" \
+      --docker-password="${REGISTRY_PASS:-}" \
+      --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -1
+
+    log_success "cf-services namespace created"
+    mark_component_installed "phase7_namespace" "$STATE_FILE"
+  fi
+
+  # --- Store broker credentials in OpenBao ---
+  if ! component_is_installed "phase7_secrets" "$STATE_FILE"; then
+    log_step "Storing broker credentials in OpenBao..."
+    local BROKER_PASS
+    BROKER_PASS=$(openssl rand -base64 16 | tr -d '=/+' | head -c 20)
+    kubectl exec -n openbao openbao-0 -- bao kv put secret/cf-service-broker/auth \
+      username="admin" password="${BROKER_PASS}" 2>&1 | tail -1
+    log_success "Broker credentials stored (password: ${BROKER_PASS})"
+    mark_component_installed "phase7_secrets" "$STATE_FILE"
+  fi
+
+  # --- Build and push broker image ---
+  if ! component_is_installed "phase7_broker_build" "$STATE_FILE"; then
+    log_step "Building CF Service Broker..."
+    local BROKER_SRC="${K8_DIR}/services/cf-service-broker/src"
+
+    if command -v go &>/dev/null && command -v crane &>/dev/null; then
+      local BUILD_DIR
+      BUILD_DIR=$(mktemp -d)
+
+      CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
+        -C "${BROKER_SRC}" -ldflags "-s -w" \
+        -o "${BUILD_DIR}/broker" . 2>&1 | tail -1
+
+      local BROKER_REGISTRY="${REGISTRY:-artifactory.cfapps.cool}/docker-local"
+      local BROKER_IMAGE="${BROKER_REGISTRY}/cf-service-broker:1.0.1-arm64"
+      local BASE_IMAGE="gcr.io/distroless/static:nonroot"
+      local TMPDIR_IMG LAYER
+      TMPDIR_IMG=$(mktemp -d)
+      mkdir -p "${TMPDIR_IMG}/app"
+      cp "${BUILD_DIR}/broker" "${TMPDIR_IMG}/app/broker"
+      LAYER=$(mktemp)
+      (cd "${TMPDIR_IMG}" && tar cf "${LAYER}" app/)
+
+      crane append --base "${BASE_IMAGE}" --new_tag "${BROKER_IMAGE}" --new_layer "${LAYER}" --platform linux/arm64 2>/dev/null
+      crane mutate "${BROKER_IMAGE}" --entrypoint "/app/broker" --tag "${BROKER_IMAGE}" 2>/dev/null
+
+      rm -rf "${BUILD_DIR}" "${TMPDIR_IMG}" "${LAYER}"
+      log_success "Broker image built and pushed: ${BROKER_IMAGE}"
+    else
+      log_warn "go or crane not found — build broker manually: k8/services/cf-service-broker/src"
+    fi
+    mark_component_installed "phase7_broker_build" "$STATE_FILE"
+  fi
+
+  # --- Deploy broker ---
+  if ! component_is_installed "phase7_broker_deploy" "$STATE_FILE"; then
+    log_step "Deploying CF Service Broker..."
+
+    # Get broker password from OpenBao
+    local BROKER_PASS
+    BROKER_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get -field=password secret/cf-service-broker/auth 2>/dev/null)
+
+    # Update deployment with password from OpenBao
+    sed "s/vxfSHItmMi82oL1vrGhV/${BROKER_PASS}/g" \
+      "${K8_DIR}/services/cf-service-broker/deployment.yaml" | kubectl apply -f - 2>&1 | tail -1
+
+    wait_for_pods "cf-services" 60
+    log_success "CF Service Broker deployed"
+    mark_component_installed "phase7_broker_deploy" "$STATE_FILE"
+  fi
+
+  # --- Register broker with Korifi ---
+  if ! component_is_installed "phase7_broker_register" "$STATE_FILE"; then
+    log_step "Registering service broker with Korifi..."
+
+    local BROKER_PASS
+    BROKER_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get -field=password secret/cf-service-broker/auth 2>/dev/null)
+
+    # Switch to cf-admin context
+    kubectl config use-context cf-admin 2>/dev/null || true
+
+    cf create-service-broker k8s-services admin "${BROKER_PASS}" \
+      http://cf-service-broker.cf-services.svc.cluster.local 2>&1 | tail -1
+
+    cf enable-service-access postgresql 2>&1 | tail -1
+    cf enable-service-access valkey 2>&1 | tail -1
+    cf enable-service-access rabbitmq 2>&1 | tail -1
+
+    # Switch back
+    kubectl config use-context k3s-devops 2>/dev/null || true
+
+    log_success "Service broker registered — cf marketplace shows all services"
+    mark_component_installed "phase7_broker_register" "$STATE_FILE"
+  fi
+
+  mark_phase_complete 7 "$STATE_FILE"
+  echo ""
+  log_success "Phase 7 complete — CF Service Brokers"
+  echo ""
+  echo -e "  ${BOLD}Services:${NC}"
+  echo -e "    postgresql   small, medium   PostgreSQL 18 via CloudNativePG"
+  echo -e "    valkey       small           Valkey (Redis-compatible)"
+  echo -e "    rabbitmq     small           RabbitMQ message broker"
+  echo ""
+  echo -e "  ${BOLD}Usage:${NC}"
+  echo -e "    cf marketplace"
+  echo -e "    cf create-service postgresql small my-db"
+  echo -e "    cf bind-service my-app my-db"
+  echo ""
+}
+
+# =============================================================================
 # Status — Show installation status
 # =============================================================================
 cmd_status() {
@@ -1872,6 +2019,7 @@ main() {
         4) install_phase_4 ;;
         5) install_phase_5 ;;
         6) install_phase_6 ;;
+        7) install_phase_7 ;;
         *)
           log_error "Unknown phase: $phase_num (valid: 1-6)"
           exit 1

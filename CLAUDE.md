@@ -12,6 +12,7 @@ Kubernetes-based DevOps environment on Apple Silicon Macs (M4+, 64GB+). Single-n
 - **Phase 4 (Services):** Deployed — artifact-keeper (Backend + Web UI v1.1.0-rc.8-patched) + PostgreSQL 17.9 + Meilisearch v1.39.0 + Trivy Scanner v0.69.3
 - **Phase 5 (GitLab CE):** Deployed — GitLab CE 18.10.0 + GitLab Runner (automated registration via distribution/install.sh)
 - **Phase 6 (Apps):** Deployed — Korifi v0.18.0 (CF on K8s) + kpack ARM64 + Contour Gateway
+- **Phase 7 (Service Brokers):** Deployed — OSBAPI Universal Broker (PostgreSQL via CloudNativePG, Valkey, RabbitMQ via Cluster Operator)
 
 ## Tech Stack
 
