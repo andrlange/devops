@@ -5,3 +5,4 @@ k8/unseal.sh
 /gcp-dns-credentials.json
 k8/distribution/.install-config
 k8/distribution/.install-state
+.worktrees/
