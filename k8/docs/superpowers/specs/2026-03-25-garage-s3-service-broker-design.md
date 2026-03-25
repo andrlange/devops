@@ -14,9 +14,9 @@ Korifi -> OSBAPI Provision -> broker
 S3Provisioner.Provision()
     |
 Garage Admin API (port 3903)
-    |-- POST /v1/key       -> creates API key "s3-<instanceID>"
-    |-- PUT  /v1/bucket     -> creates bucket "s3-<instanceID>"
-    |-- PUT  /v1/bucket/allow -> grants read+write to key
+    |-- POST /v1/key          -> creates API key "s3-<instanceID>"
+    |-- POST /v1/bucket        -> creates bucket "s3-<instanceID>"
+    |-- POST /v1/bucket/allow  -> grants read+write to key
     |
 Credentials stored in K8s Secret "s3-<instanceID>-credentials"
     |
@@ -45,22 +45,36 @@ Single plan because Garage has no per-bucket quota mechanism. Additional plans c
 
 New file: `provisioners/s3.go`
 
-### Provision(name, namespace string, params map) error
+Implements the `Provisioner` interface with actual signatures:
 
-1. Call Garage Admin API `POST /v1/key` with name `s3-<name>` — returns `accessKeyId`, `secretAccessKey`
-2. Call Garage Admin API `PUT /v1/bucket` with global alias `s3-<name>` — returns bucket ID
-3. Call Garage Admin API `PUT /v1/bucket/allow` granting `read: true, write: true` for the key on the bucket
-4. Create K8s Secret `s3-<name>-credentials` in `cf-services` namespace with fields: `access_key_id`, `secret_access_key`, `bucket`, `endpoint`, `region`
+```go
+type S3 struct {
+    AdminURL    string // Garage Admin API URL (port 3903)
+    AdminToken  string // Garage Admin API bearer token
+    S3Endpoint  string // Garage S3 API URL (port 3900)
+}
+```
 
-### Deprovision(name, namespace string) error
+### Provision(ctx context.Context, client *k8sclient.Client, name, namespace, planID string) error
 
-1. Read the secret to get the key ID
-2. Call Garage Admin API `DELETE /v1/bucket` (alias `s3-<name>`) — deletes bucket and contents
-3. Call Garage Admin API `DELETE /v1/key?id=<accessKeyId>` — deletes the API key
-4. Delete K8s Secret `s3-<name>-credentials`
-5. Lenient on errors (log and continue, matching existing broker pattern)
+1. Call Garage Admin API `POST /v1/key` with body `{"name": "s3-<name>"}` — returns `accessKeyId`, `secretAccessKey`
+2. Call Garage Admin API `POST /v1/bucket` with body `{"globalAlias": "s3-<name>"}` — returns bucket info including `id`
+3. Call Garage Admin API `POST /v1/bucket/allow` with body `{"bucketId": "<id>", "accessKeyId": "<keyId>", "permissions": {"read": true, "write": true, "owner": false}}` — grants key access to bucket
+4. Create K8s Secret `s3-<name>-credentials` in namespace with fields: `access_key_id`, `secret_access_key`, `bucket`, `bucket_id`, `endpoint`, `region`
+   - Labels: `cf-service-broker/instance-id: <name>`, `cf-service-broker/service: s3`
 
-### GetCredentials(name, namespace string) (map, error)
+Note: `bucket_id` (the Garage internal UUID) is stored in the secret because the Admin API delete endpoint requires the UUID, not the alias.
+
+### Deprovision(ctx context.Context, client *k8sclient.Client, name, namespace string) error
+
+1. Read K8s Secret `s3-<name>-credentials` to get `access_key_id` and `bucket_id`
+2. Use S3 API (port 3900) with admin credentials to list and delete all objects in the bucket (Garage refuses to delete non-empty buckets)
+3. Call Garage Admin API `DELETE /v1/bucket?id=<bucket_id>` — deletes the empty bucket
+4. Call Garage Admin API `DELETE /v1/key?id=<access_key_id>` — deletes the API key
+5. Delete K8s Secret `s3-<name>-credentials`
+6. Lenient on all errors: log and continue through all steps (matching Valkey deprovision pattern — `_ = ...`)
+
+### GetCredentials(ctx context.Context, client *k8sclient.Client, name, namespace string) (map[string]interface{}, error)
 
 1. Read K8s Secret `s3-<name>-credentials`
 2. Return credential map:
@@ -78,9 +92,9 @@ New file: `provisioners/s3.go`
 }
 ```
 
-### IsReady(name, namespace string) (bool, error)
+### IsReady(ctx context.Context, client *k8sclient.Client, name, namespace string) (bool, string, error)
 
-Check that the K8s Secret `s3-<name>-credentials` exists. Garage bucket creation is synchronous (unlike CRD-based operators), so the secret's presence confirms readiness.
+Check that the K8s Secret `s3-<name>-credentials` exists. Garage bucket creation is synchronous (unlike CRD-based operators), so the secret's presence confirms readiness. Returns `(true, "succeeded", nil)` or `(false, "provisioning", err)`.
 
 ## Garage Admin API Interaction
 
@@ -90,16 +104,30 @@ The broker calls the Garage Admin HTTP API (port 3903) directly, using a bearer 
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| POST | `/v1/key` | Create API key |
+| POST | `/v1/key` | Create API key (body: `{"name": "..."}`) |
 | GET | `/v1/key?id=<id>` | Get key info |
 | DELETE | `/v1/key?id=<id>` | Delete API key |
-| PUT | `/v1/bucket` | Create bucket |
-| DELETE | `/v1/bucket?id=<id>` | Delete bucket |
-| PUT | `/v1/bucket/allow` | Grant key access to bucket |
+| POST | `/v1/bucket` | Create bucket (body: `{"globalAlias": "..."}`) |
+| DELETE | `/v1/bucket?id=<uuid>` | Delete bucket (must be empty) |
+| POST | `/v1/bucket/allow` | Grant key access to bucket |
 
 ### Authentication
 
-Bearer token in `Authorization` header. Token sourced from Garage config (`[admin]` section) and stored in OpenBao at `secret/garage/admin-token`.
+Bearer token in `Authorization: Bearer <token>` header.
+
+## Prerequisites
+
+### Garage admin_token configuration
+
+The current Garage config (`k8/platform/garage/configmap.yaml`) has no `admin_token` set in the `[admin]` section. This must be added before the S3 provisioner can authenticate with the Admin API:
+
+```toml
+[admin]
+api_bind_addr = "[::]:3903"
+admin_token = "<generated-token>"
+```
+
+The token should be generated, added to the Garage ConfigMap, and stored in OpenBao at `secret/garage/admin-token`. Garage pod must be restarted after ConfigMap update.
 
 ## Configuration
 
@@ -112,6 +140,24 @@ New environment variables on broker deployment:
 | `GARAGE_S3_ENDPOINT` | `http://garage.garage.svc.cluster.local:3900` | Hardcoded default |
 
 ## Deployment Changes
+
+### broker.New() constructor
+
+The constructor signature changes to accept Garage config:
+
+```go
+func New(client *k8sclient.Client, namespace, valkeyImage string, garageConfig GarageConfig) *Broker
+```
+
+Where `GarageConfig` holds `AdminURL`, `AdminToken`, `S3Endpoint`. The S3 provisioner is registered alongside existing provisioners:
+
+```go
+S3ServiceID: &provisioners.S3{
+    AdminURL:   garageConfig.AdminURL,
+    AdminToken: garageConfig.AdminToken,
+    S3Endpoint: garageConfig.S3Endpoint,
+},
+```
 
 ### deployment.yaml
 
@@ -126,8 +172,9 @@ New environment variables on broker deployment:
 
 ### install.sh (Phase 7)
 
-1. Extract or configure Garage admin token, store in OpenBao at `secret/garage/admin-token`
-2. Add `cf enable-service-access s3` after broker registration
+1. Generate Garage admin token, update Garage ConfigMap, restart Garage pod
+2. Store admin token in OpenBao at `secret/garage/admin-token`
+3. Add `cf enable-service-access s3` after broker registration
 
 ## Naming Convention
 
@@ -162,10 +209,11 @@ cf service-key my-bucket my-key
 | File | Change |
 |------|--------|
 | `src/broker/catalog.go` | Add S3 service + default plan |
-| `src/broker/broker.go` | Register S3 provisioner in provisioners map |
-| `src/provisioners/s3.go` | **New** — S3Provisioner implementation |
-| `src/main.go` | Add Garage config env var parsing |
+| `src/broker/broker.go` | Update `New()` to accept GarageConfig, register S3 provisioner |
+| `src/provisioners/s3.go` | **New** — S3 provisioner implementation |
+| `src/main.go` | Parse Garage env vars, pass GarageConfig to `broker.New()` |
 | `deployment.yaml` | Image tag bump, new env vars, ESO secret reference |
+| `k8/platform/garage/configmap.yaml` | Add `admin_token` to `[admin]` section |
 | `distribution/install.sh` | Garage admin token setup, `cf enable-service-access s3` |
 
 ## Bucket Lifecycle
@@ -173,4 +221,4 @@ cf service-key my-bucket my-key
 - **Create:** Synchronous — bucket + key created immediately via Admin API
 - **Bind:** Reads pre-created credentials from K8s Secret
 - **Unbind:** No-op (matching existing broker pattern)
-- **Delete:** Removes bucket (including contents), key, and secret
+- **Delete:** Empties bucket via S3 API, then removes bucket, key, and secret via Admin API
