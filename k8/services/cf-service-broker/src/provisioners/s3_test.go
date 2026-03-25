@@ -141,20 +141,27 @@ func TestS3Provision(t *testing.T) {
 		t.Errorf("wrong service label: %s", secret.Labels["cf-service-broker/service"])
 	}
 
+	// fake client preserves StringData as-is (no conversion to Data)
 	expectedKeys := []string{"access_key_id", "secret_access_key", "bucket", "bucket_id", "endpoint", "region"}
 	for _, key := range expectedKeys {
 		if _, ok := secret.StringData[key]; !ok {
-			// Also check Data (fake client may store in Data)
 			if _, ok2 := secret.Data[key]; !ok2 {
 				t.Errorf("secret missing key: %s", key)
 			}
 		}
 	}
 
-	if v := secret.StringData["access_key_id"]; v != "GKtestkey" {
+	getSecretValue := func(key string) string {
+		if v, ok := secret.StringData[key]; ok {
+			return v
+		}
+		return string(secret.Data[key])
+	}
+
+	if v := getSecretValue("access_key_id"); v != "GKtestkey" {
 		t.Errorf("wrong access_key_id: %s", v)
 	}
-	if v := secret.StringData["bucket"]; v != "s3-testinstance" {
+	if v := getSecretValue("bucket"); v != "s3-testinstance" {
 		t.Errorf("wrong bucket: %s", v)
 	}
 }

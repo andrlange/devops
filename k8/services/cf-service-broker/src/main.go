@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 	"log/slog"
 	"net/http"
@@ -43,6 +42,9 @@ func main() {
 	if garageS3Endpoint == "" {
 		garageS3Endpoint = "http://garage.garage.svc.cluster.local:3900"
 	}
+	if garageAdminToken == "" {
+		log.Println("WARNING: GARAGE_ADMIN_TOKEN not set — S3 service provisioning will fail")
+	}
 
 	client, err := k8sclient.NewClient()
 	if err != nil {
@@ -75,7 +77,6 @@ func main() {
 	log.Printf("  Valkey image: %s", valkeyImage)
 	log.Printf("  Garage Admin: %s", garageAdminURL)
 
-	_ = context.Background()
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}

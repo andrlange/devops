@@ -199,7 +199,7 @@ func (s *S3) garageRequest(ctx context.Context, method, path string, body map[st
 
 // garageDelete sends a DELETE request to the Garage Admin API and returns the status code.
 func (s *S3) garageDelete(ctx context.Context, path string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, s.AdminURL+"/"+strings.TrimPrefix(path, "/"), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, s.AdminURL+path, nil)
 	if err != nil {
 		return 0, fmt.Errorf("create delete request: %w", err)
 	}
