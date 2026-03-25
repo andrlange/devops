@@ -11,13 +11,19 @@ import (
 	"github.com/pivotal-cf/brokerapi/v11/domain/apiresponses"
 )
 
+type GarageConfig struct {
+	AdminURL   string
+	AdminToken string
+	S3Endpoint string
+}
+
 type Broker struct {
 	client       *k8sclient.Client
 	namespace    string
 	provisioners map[string]provisioners.Provisioner
 }
 
-func New(client *k8sclient.Client, namespace, valkeyImage string) *Broker {
+func New(client *k8sclient.Client, namespace, valkeyImage string, garage GarageConfig) *Broker {
 	return &Broker{
 		client:    client,
 		namespace: namespace,
@@ -25,6 +31,11 @@ func New(client *k8sclient.Client, namespace, valkeyImage string) *Broker {
 			PostgreSQLServiceID: &provisioners.PostgreSQL{},
 			ValkeyServiceID:     &provisioners.Valkey{Image: valkeyImage},
 			RabbitMQServiceID:   &provisioners.RabbitMQ{},
+			S3ServiceID: &provisioners.S3{
+				AdminURL:   garage.AdminURL,
+				AdminToken: garage.AdminToken,
+				S3Endpoint: garage.S3Endpoint,
+			},
 		},
 	}
 }
