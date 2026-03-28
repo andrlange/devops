@@ -413,6 +413,149 @@ check_host_tools() {
   printf "\n"
 }
 
+# --- Registry authentication -------------------------------------------------
+
+REGISTRY_USER=""
+REGISTRY_PASS=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+check_registry_auth() {
+  printf "${BOLD}${CYAN}"
+  cat <<'REGBANNER'
+╔══════════════════════════════════════════════════════════════╗
+║  Registry Authentication                                     ║
+║                                                              ║
+║  This stack uses a private container registry at             ║
+║  artifactory.cfapps.cool. You need credentials to proceed.  ║
+║                                                              ║
+║  Credentials are provided by your administrator.             ║
+╚══════════════════════════════════════════════════════════════╝
+REGBANNER
+  printf "${NC}\n"
+
+  local attempts=0
+  local max_attempts=3
+
+  while [[ "$attempts" -lt "$max_attempts" ]]; do
+    local username token
+    read -rp "  Registry username: " username
+    read -rsp "  API Token: " token
+    printf "\n"
+
+    if curl -sf -u "${username}:${token}" \
+        "https://artifactory.cfapps.cool/v2/token?service=artifact-keeper" \
+        >/dev/null 2>&1; then
+
+      # Also log in to Docker if it's running
+      if docker info >/dev/null 2>&1; then
+        log_info "Docker is running — logging in to registry..."
+        if echo "$token" | docker login artifactory.cfapps.cool \
+            -u "$username" --password-stdin >/dev/null 2>&1; then
+          log_success "Docker login successful."
+        else
+          log_warn "Docker login failed (non-fatal — continuing)."
+        fi
+      fi
+
+      REGISTRY_USER="$username"
+      REGISTRY_PASS="$token"
+      log_success "Registry authentication successful."
+      printf "\n"
+      return 0
+    fi
+
+    attempts=$(( attempts + 1 ))
+    if [[ "$attempts" -lt "$max_attempts" ]]; then
+      log_error "Authentication failed. Please check your credentials."
+      printf "\n"
+    fi
+  done
+
+  log_error "Authentication failed after ${max_attempts} attempts."
+  log_error "Cannot proceed without registry access."
+  exit 1
+}
+
+# --- Unpack and configure ----------------------------------------------------
+
+unpack_and_configure() {
+  printf "${BOLD}${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+  printf "${BOLD}  Stack Installation${NC}\n"
+  printf "${BOLD}${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+  printf "\n"
+
+  # --- Install directory prompt ---
+  local default_dir="${HOME}/devops-stack"
+  local install_dir
+  read -rp "  Install directory [~/devops-stack]: " install_dir
+  install_dir="${install_dir:-$default_dir}"
+  # Expand ~ if the user typed it literally
+  install_dir="${install_dir/#\~/$HOME}"
+
+  if [[ -d "$install_dir" ]]; then
+    local display_dir="${install_dir/#$HOME/~}"
+    local ans
+    read -rp "  Directory '${display_dir}' already exists. Overwrite? [y/N] " ans
+    ans="${ans:-N}"
+    if [[ ! "$ans" =~ ^[Yy]$ ]]; then
+      log_error "Installation aborted."
+      exit 1
+    fi
+    rm -rf "$install_dir"
+  fi
+
+  # --- Checksum verification ---
+  local tgz="${SCRIPT_DIR}/stack.tgz"
+  if [[ ! -f "$tgz" ]]; then
+    log_error "stack.tgz not found in ${SCRIPT_DIR}"
+    exit 1
+  fi
+
+  if [[ "$EXPECTED_CHECKSUM" == "PLACEHOLDER" ]]; then
+    log_warn "Checksum verification skipped (development mode)."
+  else
+    log_info "Verifying stack.tgz checksum..."
+    local actual_checksum
+    actual_checksum=$(shasum -a 256 "${tgz}" | cut -d' ' -f1)
+    if [[ "$actual_checksum" != "$EXPECTED_CHECKSUM" ]]; then
+      log_error "Checksum verification failed!"
+      log_error "  Expected: ${EXPECTED_CHECKSUM}"
+      log_error "  Actual:   ${actual_checksum}"
+      exit 1
+    fi
+    log_success "Checksum verified."
+  fi
+
+  # --- Extract ---
+  log_info "Extracting stack.tgz..."
+  mkdir -p "$install_dir"
+  tar xzf "${tgz}" -C "$install_dir"
+  log_success "Stack extracted."
+
+  # --- Write .install-config ---
+  local config_dir="${install_dir}/k8/distribution"
+  mkdir -p "$config_dir"
+  cat > "${config_dir}/.install-config" <<EOF
+REGISTRY="artifactory.cfapps.cool"
+REGISTRY_REPO="docker-local"
+REGISTRY_USER="${REGISTRY_USER}"
+REGISTRY_PASS="${REGISTRY_PASS}"
+EOF
+  chmod 600 "${config_dir}/.install-config"
+  log_success "Install config written."
+
+  # --- Next steps ---
+  local display_dir="${install_dir/#$HOME/~}"
+  printf "\n"
+  printf "  ${GREEN}✓${NC} Stack unpacked to ${BOLD}${display_dir}${NC}\n"
+  printf "\n"
+  printf "  Next steps:\n"
+  printf "    1. Set up DNS provider (see GETTING_STARTED.md in ${display_dir}/)\n"
+  printf "    2. Run the installer:\n"
+  printf "       cd ${display_dir}/k8/distribution && ./install.sh\n"
+  printf "\n"
+}
+
 # --- Main --------------------------------------------------------------------
 
 main() {
@@ -448,6 +591,9 @@ main() {
   printf "\n"
 
   check_host_tools
+
+  check_registry_auth
+  unpack_and_configure
 }
 
 main "$@"
