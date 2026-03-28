@@ -49,29 +49,24 @@ write_credentials() {
       kubectl exec -n openbao openbao-0 -- bao login "${OPENBAO_ROOT_TOKEN}" >/dev/null 2>&1 || true
     fi
 
-    # Read credentials from multiple sources: script variables → OpenBao → K8s Secrets
-    local BAO_GET="kubectl exec -n openbao openbao-0 -- bao kv get -field"
+    # Helper: read a single field from OpenBao KV
+    _bao_field() { kubectl exec -n openbao openbao-0 -- bao kv get "-field=$1" "$2" 2>/dev/null || echo ""; }
 
-    # ArgoCD: stored in K8s Secret (not OpenBao)
-    local argocd_pw="${ARGOCD_ADMIN_PASSWORD:-$(kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "")}"
-
-    # Grafana: stored in OpenBao
-    local grafana_pw="${GRAFANA_ADMIN_PASSWORD:-$(${BAO_GET}=password secret/grafana/admin 2>/dev/null || echo "")}"
-
-    # artifact-keeper: stored in OpenBao
-    local ak_pw="${AK_ADMIN_PASSWORD:-$(${BAO_GET}=admin_password secret/artifact-keeper/app 2>/dev/null || echo "")}"
-
-    # GitLab: stored in OpenBao
-    local gitlab_pw="${GITLAB_ROOT_PASSWORD:-$(${BAO_GET}=root_password secret/gitlab/admin 2>/dev/null || echo "")}"
-
-    # Garage: stored in OpenBao
-    local garage_token="${GARAGE_ADMIN_TOKEN:-$(${BAO_GET}=token secret/garage/admin-token 2>/dev/null || echo "")}"
-    local garage_ak="${GARAGE_ADMIN_KEY:-$(${BAO_GET}=access_key secret/garage/admin 2>/dev/null || echo "")}"
-    local garage_sk="${GARAGE_ADMIN_SECRET:-$(${BAO_GET}=secret_key secret/garage/admin 2>/dev/null || echo "")}"
-
-    # Velero: S3 credentials from OpenBao
-    local velero_ak="$(${BAO_GET}=access_key secret/garage/velero 2>/dev/null || echo "")"
-    local velero_sk="$(${BAO_GET}=secret_key secret/garage/velero 2>/dev/null || echo "")"
+    # ArgoCD: K8s Secret (not OpenBao)
+    local argocd_pw="${ARGOCD_ADMIN_PASSWORD:-$(kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null)}"
+    # Grafana
+    local grafana_pw="${GRAFANA_ADMIN_PASSWORD:-$(_bao_field password secret/grafana/admin)}"
+    # artifact-keeper
+    local ak_pw="${AK_ADMIN_PASSWORD:-$(_bao_field admin_password secret/artifact-keeper/app)}"
+    # GitLab
+    local gitlab_pw="${GITLAB_ROOT_PASSWORD:-$(_bao_field root_password secret/gitlab/admin)}"
+    # Garage
+    local garage_token="${GARAGE_ADMIN_TOKEN:-$(_bao_field token secret/garage/admin-token)}"
+    local garage_ak="${GARAGE_ADMIN_KEY:-$(_bao_field access_key secret/garage/admin)}"
+    local garage_sk="${GARAGE_ADMIN_SECRET:-$(_bao_field secret_key secret/garage/admin)}"
+    # Velero
+    local velero_ak="$(_bao_field access_key secret/garage/velero)"
+    local velero_sk="$(_bao_field secret_key secret/garage/velero)"
 
     cat > "$cred_file" <<CRED_EOF
 # Stack Credentials
