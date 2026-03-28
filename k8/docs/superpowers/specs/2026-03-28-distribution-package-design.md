@@ -29,18 +29,19 @@ Colleague receives: installer.sh + stack.tgz
         |
         v
    installer.sh
-   +-- System-Check (macOS 26.3+, M4+, 64GB, 500GB)
-   +-- Token-Validation (docker login against artifactory.cfapps.cool)
-   +-- Tool-Installation (brew, kubectl, helm, limactl, ...)
-   +-- Unpack stack.tgz -> ~/devops-stack/ (or user-chosen path)
-   +-- Write credentials into install directory
-   +-- Message: "cd ~/devops-stack/k8/distribution && ./install.sh"
+   +-- 1. System-Check (macOS 26.0+, M4+, 64GB, 500GB)
+   +-- 2. Tool-Installation (brew, docker, kubectl, helm, limactl, ...)
+   +-- 3. Token-Validation (curl against artifactory.cfapps.cool/v2/token)
+   +-- 4. Unpack stack.tgz -> ~/devops-stack/ (or user-chosen path)
+   +-- 5. Write credentials into .install-config format
+   +-- 6. Message: "cd ~/devops-stack/k8/distribution && ./install.sh"
         |
         v
    install.sh (existing)
    +-- Iteration Zero (Domain, Network, DNS Provider, Passwords)
-   +-- Phase 1-7 (fully automated, no manual steps)
-   +-- credentials.md updated after each phase
+   +-- Phase 1-6 (fully automated, no manual steps)
+   +-- Phase 7: Service Brokers (requires go — optional)
+   +-- credentials.md updated after each phase (NEW — to be implemented)
 ```
 
 ## installer.sh Specification
@@ -49,15 +50,53 @@ Colleague receives: installer.sh + stack.tgz
 
 | Check | Minimum | Command |
 |-------|---------|---------|
-| macOS Version | 26.3+ | `sw_vers -productVersion` |
-| Chip | M4+ (M4, M5, M6, ...) | `system_profiler SPHardwareDataType \| grep Chip` — parse number after "M", require >= 4 |
+| macOS Version | 26.0+ | `sw_vers -productVersion` — minimum for Apple Virtualization.framework vzNAT support |
+| Chip | M4+ (M4, M5, M6, ...) | `system_profiler SPHardwareDataType \| grep Chip` — extract number after "M" with regex `Apple M([0-9]+)`, require >= 4. Handles suffixes: Pro, Max, Ultra |
 | Architecture | ARM64 | `uname -m` |
-| Free Disk | 500GB | `df -g /` |
+| Free Disk | 500GB | `df -g /` — Lima VM disk (200GB) + images + headroom |
 | RAM | 64GB | `sysctl -n hw.memsize` — convert to GB |
 
 Failure message: "Your system does not meet the minimum requirements. <specific reason>"
 
-### Step 2: Registry Authentication
+### Step 2: Host Tools (install if missing, with confirmation)
+
+Tools must be installed BEFORE registry validation (Docker needed for docker login).
+
+**Required tools:**
+
+| Tool | Install Method | Min. Version |
+|------|---------------|-------------|
+| Homebrew | Official installer script (requires sudo) | - |
+| Docker Desktop | `brew install --cask docker` | - |
+| limactl | `brew install lima` | 1.0+ |
+| kubectl | `brew install kubectl` | 1.28+ |
+| helm | `brew install helm` | 3.12+ |
+| jq | `brew install jq` | - |
+| envsubst | `brew install gettext` | - |
+| skopeo | `brew install skopeo` | - |
+| crane | `brew install crane` | - |
+| cf CLI | `brew install cloudfoundry/tap/cf-cli@8` | 8+ |
+
+**Optional tools (offered separately):**
+
+| Tool | Install Method | Purpose |
+|------|---------------|---------|
+| go | `brew install go` | Required for Phase 7 (Service Broker build) |
+| argocd | `brew install argocd` | ArgoCD CLI |
+| velero | `brew install velero` | Backup management CLI |
+| k9s | `brew install k9s` | Kubernetes TUI |
+
+**Flow:**
+1. Check all tools, display status table (installed/missing/version)
+2. If brew missing: install brew first (requires sudo)
+3. "X required tools missing. Install automatically? [Y/n]"
+4. "Install optional tools? (go, argocd, velero, k9s) [y/N]"
+5. If Docker Desktop just installed: prompt to start it and wait for Docker daemon
+6. If user declines required tools: abort with message
+
+### Step 3: Registry Authentication
+
+Runs AFTER tool installation so Docker is available.
 
 ```
 +----------------------------------------------------------+
@@ -72,50 +111,35 @@ Registry username: ________
 API Token: ________
 ```
 
-- Validate via `docker login artifactory.cfapps.cool -u <user> -p <token>`
-- On success: store in `<install-dir>/.registry-credentials` (chmod 600)
+**Validation:** Two-step approach for robustness:
+1. Lightweight check via `curl -u <user>:<token> https://artifactory.cfapps.cool/v2/token?service=artifact-keeper` (works without Docker daemon)
+2. If Docker is running: also run `docker login artifactory.cfapps.cool -u <user> -p <token>` to persist credentials for later pulls
+
+- On success: credentials stored (see Step 4)
 - On failure: retry up to 3 times, then abort
 - No token = abort: "Cannot proceed without registry access."
-
-### Step 3: Host Tools (install if missing, with confirmation)
-
-**Required tools:**
-
-| Tool | Install Method | Min. Version |
-|------|---------------|-------------|
-| Homebrew | Official installer script | - |
-| limactl | `brew install lima` | 1.0+ |
-| kubectl | `brew install kubectl` | 1.28+ |
-| helm | `brew install helm` | 3.12+ |
-| jq | `brew install jq` | - |
-| envsubst | `brew install gettext` | - |
-| skopeo | `brew install skopeo` | - |
-| crane | `brew install crane` | - |
-| cf CLI | `brew install cloudfoundry/tap/cf-cli@8` | 8+ |
-| docker | Docker Desktop (manual install prompt) | - |
-
-**Optional tools (offered separately):**
-
-| Tool | Install Method |
-|------|---------------|
-| argocd | `brew install argocd` |
-| velero | `brew install velero` |
-| k9s | `brew install k9s` |
-
-**Flow:**
-1. Check all tools, display status table (installed/missing/version)
-2. If brew missing: install brew first (requires sudo)
-3. "X required tools missing. Install automatically? [Y/n]"
-4. "Install optional tools? (argocd, velero, k9s) [y/N]"
-5. sudo prompt where needed (brew, Docker Desktop)
-6. If user declines required tools: abort with message
 
 ### Step 4: Unpack & Configure
 
 1. Ask for install directory (default: `~/devops-stack`)
-2. Extract `stack.tgz` to chosen directory
-3. Write `.registry-credentials` into `<install-dir>/k8/`
-4. Print next steps message
+2. Verify SHA256 checksum of `stack.tgz` (checksum embedded in installer.sh during build)
+3. Extract `stack.tgz` to chosen directory
+4. Write credentials into `<install-dir>/k8/distribution/.install-config` in the format install.sh expects:
+   ```bash
+   REGISTRY="artifactory.cfapps.cool"
+   REGISTRY_REPO="docker-local"
+   REGISTRY_USER="<username>"
+   REGISTRY_PASS="<api-token>"
+   ```
+   (chmod 600) — install.sh Iteration Zero will detect these as defaults
+5. Print next steps message
+
+### Re-run Behavior
+
+installer.sh is idempotent:
+- If install directory exists: ask "Directory exists. Overwrite? [y/N]"
+- Tool checks skip already-installed tools
+- Registry credentials are re-validated and overwritten
 
 ## stack.tgz Specification
 
@@ -153,10 +177,26 @@ stack/
 
 ### Build script
 
-`build-distribution.sh` in repo root creates `stack.tgz`:
+`build-distribution.sh` in repo root creates both deliverables:
 
 ```bash
 ./build-distribution.sh    # -> produces installer.sh + stack.tgz
+
+# Internally:
+# 1. Compute SHA256 of stack.tgz
+# 2. Embed checksum into installer.sh (EXPECTED_CHECKSUM variable)
+# 3. Output: dist/installer.sh + dist/stack.tgz
+```
+
+Exclusions applied via tar flags:
+```bash
+tar czf stack.tgz \
+  --exclude='.git' --exclude='.DS_Store' \
+  --exclude='.env' --exclude='.env.local' \
+  --exclude='.install-config' --exclude='.install-state' \
+  --exclude='credentials.md' \
+  --exclude='.superpowers' \
+  k8/ demos/ GETTING_STARTED.md
 ```
 
 ## Domain Configuration
@@ -180,7 +220,7 @@ DNS setup (creating service accounts/IAM users) is the **only manual step** — 
 
 ## credentials.md
 
-Generated automatically during installation, updated after each phase.
+**NEW FEATURE** — to be implemented in install.sh. Generated automatically during installation, updated after each phase.
 
 ```markdown
 # Stack Credentials
@@ -220,7 +260,7 @@ English-language guide with these sections:
 3. **DNS Setup**
    - Google Cloud DNS: create project, enable API, create service account with `dns.admin` role, export JSON key (gcloud CLI commands)
    - AWS Route 53: create IAM user, attach Route53FullAccess policy, create access key (aws CLI commands)
-4. **Installation Phases** — Brief description of phases 1-7, which are optional
+4. **Installation Phases** — Brief description of phases 1-6 (required) and phase 7 (optional, requires go)
 5. **Post-Installation** — Service URLs, credentials.md reference, stack.sh usage
 6. **Troubleshooting** — Lima VM issues, ImagePullBackOff, certificate problems, OpenBao sealed, MetalLB issues
 7. **Updating** — How to pull new images, update the stack
@@ -253,3 +293,10 @@ The **only manual prerequisite** is DNS provider setup (GCP/AWS service account 
 - `credentials.md` stored with chmod 600
 - No secrets in stack.tgz
 - OpenBao unseal keys only in credentials.md (never in git)
+
+## Network Requirements
+
+- Unrestricted internet access required during installation (Homebrew, Docker Hub, Helm repos, K3s installer, Let's Encrypt)
+- If behind a corporate proxy: set `HTTP_PROXY`/`HTTPS_PROXY` environment variables before running installer.sh
+- Port 443 outbound required for registry access (artifactory.cfapps.cool)
+- DNS provider API access required (GCP APIs or AWS Route53)
