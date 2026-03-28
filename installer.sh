@@ -44,8 +44,8 @@ banner() {
   printf "${BOLD}${CYAN}"
   cat <<'BANNER'
 ╔══════════════════════════════════════════════════════════════╗
-║  K8s DevOps Stack — Installer v1.0                          ║
-║  Pre-flight checks and environment setup                    ║
+║  K8s DevOps Stack — Installer v1.0                           ║
+║  Pre-flight checks and environment setup                     ║
 ╚══════════════════════════════════════════════════════════════╝
 BANNER
   printf "${NC}\n"
@@ -426,7 +426,7 @@ check_registry_auth() {
 ║  Registry Authentication                                     ║
 ║                                                              ║
 ║  This stack uses a private container registry at             ║
-║  artifactory.cfapps.cool. You need credentials to proceed.  ║
+║  artifactory.cfapps.cool. You need credentials to proceed.   ║
 ║                                                              ║
 ║  Credentials are provided by your administrator.             ║
 ╚══════════════════════════════════════════════════════════════╝
