@@ -100,6 +100,19 @@ PHASE1
 }
 
 # =============================================================================
+# get_metallb_ips — Derive platform and apps IPs from METALLB_IP_RANGE
+# =============================================================================
+get_metallb_platform_ip() {
+  echo "${METALLB_IP_RANGE%%-*}"
+}
+get_metallb_apps_ip() {
+  local first_ip="${METALLB_IP_RANGE%%-*}"
+  local base="${first_ip%.*}"
+  local last="${first_ip##*.}"
+  echo "${base}.$((last + 3))"
+}
+
+# =============================================================================
 # substitute_domains — Replace hardcoded domains across all K8s manifests
 # =============================================================================
 substitute_domains() {
@@ -937,10 +950,105 @@ install_phase_2() {
     log_step "2.3 — Garage"
     ensure_namespace "garage"
 
-    smart_install "garage" "${K8_DIR}/platform/garage" "garage"
-    wait_for_pods "garage" 120
-    log_success "Garage installed"
+    # Generate Garage secrets if not already set
+    local garage_rpc_secret
+    garage_rpc_secret=$(openssl rand -hex 32)
+    local garage_admin_token
+    garage_admin_token=$(openssl rand -hex 32)
 
+    # Patch ConfigMap with generated secrets and correct domains before applying
+    sed -i '' \
+      -e "s/rpc_secret = .*/rpc_secret = \"${garage_rpc_secret}\"/" \
+      -e "s/admin_token = .*/admin_token = \"${garage_admin_token}\"/" \
+      "${K8_DIR}/platform/garage/configmap.yaml"
+
+    smart_install "garage" "${K8_DIR}/platform/garage" "garage"
+    wait_for_pods "garage" 180
+
+    # Wait for Garage admin API to be reachable
+    log_info "Waiting for Garage admin API..."
+    local BAO="kubectl exec -n openbao openbao-0 --"
+    local garage_api="http://garage.garage.svc:3903"
+    local attempts=0
+    while ! kubectl exec -n garage garage-0 -- curl -sf "${garage_api}/health" &>/dev/null; do
+      attempts=$((attempts + 1))
+      if [[ $attempts -ge 60 ]]; then
+        log_warn "Garage admin API not reachable after 60s. Continuing..."
+        break
+      fi
+      sleep 2
+    done
+
+    # Configure Garage node layout
+    log_info "Configuring Garage node layout..."
+    local node_id
+    node_id=$(kubectl exec -n garage garage-0 -- curl -sf \
+      -H "Authorization: Bearer ${garage_admin_token}" \
+      "${garage_api}/v1/status" 2>/dev/null | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['node'])" 2>/dev/null || echo "")
+
+    if [[ -n "$node_id" ]]; then
+      kubectl exec -n garage garage-0 -- curl -sf -X POST \
+        -H "Authorization: Bearer ${garage_admin_token}" \
+        -H "Content-Type: application/json" \
+        -d "[{\"id\":\"${node_id}\",\"zone\":\"dc1\",\"capacity\":214748364800,\"tags\":[\"node1\"]}]" \
+        "${garage_api}/v1/layout" >/dev/null 2>&1
+
+      # Apply layout
+      local layout_version
+      layout_version=$(kubectl exec -n garage garage-0 -- curl -sf \
+        -H "Authorization: Bearer ${garage_admin_token}" \
+        "${garage_api}/v1/layout" 2>/dev/null | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['version'])" 2>/dev/null || echo "1")
+      kubectl exec -n garage garage-0 -- curl -sf -X POST \
+        -H "Authorization: Bearer ${garage_admin_token}" \
+        -H "Content-Type: application/json" \
+        -d "{\"version\":${layout_version}}" \
+        "${garage_api}/v1/layout/apply" >/dev/null 2>&1
+      log_success "Garage node layout configured"
+    fi
+
+    # Create S3 API keys for all services and store in OpenBao
+    log_info "Creating Garage S3 API keys..."
+    local BAO="kubectl exec -n openbao openbao-0 --"
+    $BAO bao login "${OPENBAO_ROOT_TOKEN:-}" >/dev/null 2>&1 || true
+
+    for svc_name in admin loki mimir tempo velero artifacts; do
+      local key_response
+      key_response=$(kubectl exec -n garage garage-0 -- curl -sf -X POST \
+        -H "Authorization: Bearer ${garage_admin_token}" \
+        -H "Content-Type: application/json" \
+        -d "{\"name\":\"${svc_name}\"}" \
+        "${garage_api}/v1/key" 2>/dev/null || echo "")
+
+      if [[ -n "$key_response" ]]; then
+        local ak sk
+        ak=$(echo "$key_response" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['accessKeyId'])" 2>/dev/null)
+        sk=$(echo "$key_response" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['secretAccessKey'])" 2>/dev/null)
+
+        if [[ -n "$ak" ]] && [[ -n "$sk" ]]; then
+          $BAO bao kv put "secret/garage/${svc_name}" \
+            access_key="$ak" secret_key="$sk" >/dev/null 2>&1
+          log_success "Garage S3 key '${svc_name}' created and stored in OpenBao"
+
+          # Create buckets for each service
+          local bucket_name="${svc_name}"
+          [[ "$svc_name" == "admin" ]] && bucket_name="" # Skip bucket for admin key
+          if [[ -n "$bucket_name" ]]; then
+            kubectl exec -n garage garage-0 -- curl -sf -X PUT \
+              -H "Authorization: Bearer ${garage_admin_token}" \
+              "${garage_api}/v1/bucket" \
+              -H "Content-Type: application/json" \
+              -d "{\"globalAlias\":\"${bucket_name}\"}" >/dev/null 2>&1 || true
+          fi
+        fi
+      fi
+    done
+
+    # Store admin token in OpenBao
+    $BAO bao kv put "secret/garage/admin-token" \
+      token="${garage_admin_token}" >/dev/null 2>&1
+    log_success "Garage admin token stored in OpenBao"
+
+    log_success "Garage installed and bootstrapped"
     mark_component_installed "GARAGE" "$STATE_FILE"
   else
     log_info "Garage already installed, skipping"
@@ -1197,19 +1305,46 @@ install_phase_4() {
   check_phase_prerequisites 4 "$STATE_FILE"
   export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
 
-  # --- Create Garage key for artifacts bucket ---
-  if ! component_is_installed "phase4_garage_key" "$STATE_FILE"; then
-    log_step "Creating Garage API key for artifacts bucket..."
-    local key_output
-    key_output=$(kubectl exec -n garage garage-0 -- /garage key create artifacts-key 2>&1)
-    local ak=$(echo "$key_output" | grep "Key ID" | awk '{print $NF}')
-    local sk=$(echo "$key_output" | grep "Secret key" | awk '{print $NF}')
-    kubectl exec -n garage garage-0 -- /garage bucket allow --read --write artifacts --key artifacts-key &>/dev/null
+  # Ensure OpenBao is logged in
+  if [[ -z "${OPENBAO_ROOT_TOKEN:-}" ]]; then
+    printf "  ${BOLD}OpenBao Root Token${NC}: " >&2
+    read -rs OPENBAO_ROOT_TOKEN </dev/tty
+    echo "" >&2
+  fi
+  kubectl exec -n openbao openbao-0 -- bao login "${OPENBAO_ROOT_TOKEN}" >/dev/null 2>&1 || true
 
-    # Store in OpenBao
-    kubectl exec -n openbao openbao-0 -- bao kv put secret/garage/artifacts \
-      access_key="$ak" secret_key="$sk" &>/dev/null
-    log_success "Garage artifacts key created and stored in OpenBao"
+  # --- Verify Garage artifacts key exists in OpenBao ---
+  if ! component_is_installed "phase4_garage_key" "$STATE_FILE"; then
+    log_step "Verifying Garage artifacts key in OpenBao..."
+    local BAO="kubectl exec -n openbao openbao-0 --"
+    $BAO bao login "${OPENBAO_ROOT_TOKEN:-}" >/dev/null 2>&1 || true
+    local artifacts_key
+    artifacts_key=$($BAO bao kv get -field=access_key secret/garage/artifacts 2>/dev/null || echo "")
+    if [[ -n "$artifacts_key" ]]; then
+      log_success "Garage artifacts key found in OpenBao (created in Phase 2)"
+    else
+      log_warn "Garage artifacts key not found — creating via admin API..."
+      local garage_admin_token
+      garage_admin_token=$($BAO bao kv get -field=token secret/garage/admin-token 2>/dev/null || echo "")
+      if [[ -n "$garage_admin_token" ]]; then
+        local garage_api="http://garage.garage.svc:3903"
+        local key_resp
+        key_resp=$(kubectl exec -n garage garage-0 -- curl -sf -X POST \
+          -H "Authorization: Bearer ${garage_admin_token}" \
+          -H "Content-Type: application/json" \
+          -d '{"name":"artifacts"}' \
+          "${garage_api}/v1/key" 2>/dev/null || echo "")
+        if [[ -n "$key_resp" ]]; then
+          local ak sk
+          ak=$(echo "$key_resp" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['accessKeyId'])" 2>/dev/null)
+          sk=$(echo "$key_resp" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['secretAccessKey'])" 2>/dev/null)
+          $BAO bao kv put secret/garage/artifacts access_key="$ak" secret_key="$sk" >/dev/null 2>&1
+          log_success "Garage artifacts key created and stored in OpenBao"
+        else
+          log_warn "Could not create Garage key — Garage may not be ready"
+        fi
+      fi
+    fi
     mark_component_installed "phase4_garage_key" "$STATE_FILE"
   fi
 
@@ -1257,6 +1392,14 @@ install_phase_5() {
   load_config
   check_phase_prerequisites 5 "$STATE_FILE"
   export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
+
+  # Ensure OpenBao is logged in
+  if [[ -z "${OPENBAO_ROOT_TOKEN:-}" ]]; then
+    printf "  ${BOLD}OpenBao Root Token${NC}: " >&2
+    read -rs OPENBAO_ROOT_TOKEN </dev/tty
+    echo "" >&2
+  fi
+  kubectl exec -n openbao openbao-0 -- bao login "${OPENBAO_ROOT_TOKEN}" >/dev/null 2>&1 || true
 
   local GITLAB_DOMAIN="${PLATFORM_DOMAIN:-development.cfapps.cool}"
 
@@ -1421,7 +1564,7 @@ install_phase_6() {
       -n projectcontour \
       --set contour.gatewayAPIEnabled=true \
       --set envoy.service.type=LoadBalancer \
-      --set envoy.service.annotations."metallb\.universe\.tf/loadBalancerIPs"="${CONTOUR_IP:-${ip_base:-192.168.64}.$((${ip_last_octet:-200} + 3))}" \
+      --set envoy.service.annotations."metallb\.universe\.tf/loadBalancerIPs"="$(get_metallb_apps_ip)" \
       2>&1 | tail -3
     wait_for_pods "projectcontour" 120
     log_success "Contour installed"
