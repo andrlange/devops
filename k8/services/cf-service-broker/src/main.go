@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 	"log/slog"
 	"net/http"
@@ -18,6 +17,9 @@ func main() {
 	namespace := os.Getenv("SERVICE_NAMESPACE")
 	valkeyImage := os.Getenv("VALKEY_IMAGE")
 	port := os.Getenv("PORT")
+	garageAdminURL := os.Getenv("GARAGE_ADMIN_URL")
+	garageAdminToken := os.Getenv("GARAGE_ADMIN_TOKEN")
+	garageS3Endpoint := os.Getenv("GARAGE_S3_ENDPOINT")
 
 	if username == "" {
 		username = "admin"
@@ -34,13 +36,26 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	if garageAdminURL == "" {
+		garageAdminURL = "http://garage.garage.svc.cluster.local:3903"
+	}
+	if garageS3Endpoint == "" {
+		garageS3Endpoint = "http://garage.garage.svc.cluster.local:3900"
+	}
+	if garageAdminToken == "" {
+		log.Println("WARNING: GARAGE_ADMIN_TOKEN not set — S3 service provisioning will fail")
+	}
 
 	client, err := k8sclient.NewClient()
 	if err != nil {
 		log.Fatalf("Failed to create K8s client: %v", err)
 	}
 
-	b := broker.New(client, namespace, valkeyImage)
+	b := broker.New(client, namespace, valkeyImage, broker.GarageConfig{
+		AdminURL:   garageAdminURL,
+		AdminToken: garageAdminToken,
+		S3Endpoint: garageS3Endpoint,
+	})
 	logger := slog.Default()
 
 	credentials := brokerapi.BrokerCredentials{
@@ -60,8 +75,8 @@ func main() {
 	log.Printf("CF Service Broker starting on :%s", port)
 	log.Printf("  Namespace: %s", namespace)
 	log.Printf("  Valkey image: %s", valkeyImage)
+	log.Printf("  Garage Admin: %s", garageAdminURL)
 
-	_ = context.Background()
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}

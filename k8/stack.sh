@@ -21,6 +21,7 @@ fi
 source "${SCRIPT_DIR}/config.env"
 
 KUBECONFIG_HOST="${HOME}/.kube/config-k3s"
+KUBE_CONTEXT="k3s-${LIMA_VM_NAME}"
 
 # Domain fallbacks (support both old BASE_DOMAIN and new PLATFORM_DOMAIN/APPS_DOMAIN)
 PLATFORM_DOMAIN="${PLATFORM_DOMAIN:-${BASE_DOMAIN:-development.cfapps.cool}}"
@@ -30,6 +31,7 @@ APPS_DOMAIN="${APPS_DOMAIN:-app.cfapps.cool}"
 # Colors
 # ---------------------------------------------------------------------------
 RED='\033[0;31m'
+LIGHT_RED='\033[1;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
@@ -69,7 +71,8 @@ vm_is_running() {
 
 # Get Lima VM IP address
 vm_ip() {
-    limactl shell "$LIMA_VM_NAME" hostname -I 2>/dev/null | awk '{print $1}'
+    limactl shell "$LIMA_VM_NAME" ip -4 addr show lima0 2>/dev/null \
+        | awk '/inet / {split($2, a, "/"); print a[1]}'
 }
 
 # Run kubectl with a timeout, suppress errors if requested
@@ -78,9 +81,85 @@ kube() {
 }
 
 # ---------------------------------------------------------------------------
+# Multi-VM detection
+# ---------------------------------------------------------------------------
+
+# Lists all Lima VMs whose name starts with "k3s-". Output: name\tstatus per line.
+list_k3s_vms() {
+    limactl list --json 2>/dev/null \
+        | jq -r 'select(.name | startswith("k3s-")) | "\(.name)\t\(.status)"'
+}
+
+# Returns the name of the currently running k3s-* VM (expect 0 or 1).
+detect_running_vm() {
+    limactl list --json 2>/dev/null \
+        | jq -r 'select((.name | startswith("k3s-")) and .status == "Running") | .name'
+}
+
+# Reads the PLATFORM_DOMAIN associated with a VM.
+vm_domain() {
+    local vm_name="$1"
+    if limactl list --json 2>/dev/null | jq -e --arg n "$vm_name" 'select(.name == $n and .status == "Running")' &>/dev/null; then
+        limactl shell "$vm_name" grep "^PLATFORM_DOMAIN=" /mnt/k8/config.env 2>/dev/null \
+            | cut -d= -f2 | tr -d '"' || echo "unknown"
+    else
+        for dir in "${HOME}/devops-stack" "${HOME}/development/devops"; do
+            local cfg="${dir}/k8/config.env"
+            if [[ -f "$cfg" ]]; then
+                grep "^PLATFORM_DOMAIN=" "$cfg" 2>/dev/null | cut -d= -f2 | tr -d '"' && return
+            fi
+        done
+        echo "unknown"
+    fi
+}
+
+# If multiple k3s-* VMs exist, presents a selection menu. If only one, returns it automatically.
+select_vm() {
+    local vms=()
+    local statuses=()
+    while IFS=$'\t' read -r name status; do
+        vms+=("$name")
+        statuses+=("$status")
+    done < <(list_k3s_vms)
+
+    if [[ ${#vms[@]} -eq 0 ]]; then
+        err "No k3s-* Lima VMs found"
+        return 1
+    fi
+
+    if [[ ${#vms[@]} -eq 1 ]]; then
+        echo "${vms[0]}"
+        return 0
+    fi
+
+    # Multiple VMs: show selection menu
+    printf "\n${BOLD}Available stacks:${NC}\n"
+    local i
+    for ((i=0; i<${#vms[@]}; i++)); do
+        local domain
+        domain=$(vm_domain "${vms[$i]}")
+        printf "  %d) %-20s (%-10s) - %s\n" "$((i+1))" "${vms[$i]}" "${statuses[$i]}" "$domain"
+    done
+    echo
+    local choice
+    read -r -p "Select stack [1]: " choice
+    choice="${choice:-1}"
+
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 ]] || [[ "$choice" -gt ${#vms[@]} ]]; then
+        err "Invalid selection: ${choice}"
+        return 1
+    fi
+
+    echo "${vms[$((choice-1))]}"
+}
+
+# ---------------------------------------------------------------------------
 # start
 # ---------------------------------------------------------------------------
 cmd_start() {
+    LIMA_VM_NAME=$(select_vm) || exit 1
+    KUBE_CONTEXT="k3s-${LIMA_VM_NAME}"
+
     header "Starting K8s DevOps Stack"
 
     # 1. Check Lima
@@ -88,6 +167,14 @@ cmd_start() {
     require_cmd limactl
     require_cmd kubectl
     require_cmd jq
+
+    # 1b. Ensure correct kubectl context (save previous, switch if needed)
+    local prev_context
+    prev_context=$(kubectl config current-context 2>/dev/null || echo "")
+    if [[ -n "$prev_context" && "$prev_context" != "$KUBE_CONTEXT" ]]; then
+        info "Switching kubectl context from '${prev_context}' to '${KUBE_CONTEXT}'"
+        kubectl config use-context "$KUBE_CONTEXT" &>/dev/null || true
+    fi
 
     # 2. Start Lima VM
     if vm_is_running; then
@@ -149,7 +236,7 @@ cmd_start() {
         cert-manager
     )
     for ns in "${core_namespaces[@]}"; do
-        wait_for_namespace "$ns" 60 || true
+        wait_for_namespace "$ns" 90 || true
     done
 
     # 5b. Auto-unseal OpenBao (required before ESO can sync secrets)
@@ -165,7 +252,7 @@ cmd_start() {
         velero
     )
     for ns in "${platform_namespaces[@]}"; do
-        wait_for_namespace "$ns" 30 || true
+        wait_for_namespace "$ns" 60 || true
     done
 
     # 6b. Ensure Velero BSL default is set
@@ -218,6 +305,12 @@ cmd_start() {
     # 12. Print endpoint table
     print_endpoints
 
+    # 13. Restore previous kubectl context if it was different
+    if [[ -n "${prev_context:-}" && "$prev_context" != "$KUBE_CONTEXT" ]]; then
+        kubectl config use-context "$prev_context" &>/dev/null || true
+        info "Restored kubectl context to '${prev_context}'"
+    fi
+
     ok "Stack is up"
 }
 
@@ -248,12 +341,21 @@ wait_for_namespace() {
 # stop
 # ---------------------------------------------------------------------------
 cmd_stop() {
+    local running_vm
+    running_vm=$(detect_running_vm)
+    if [[ -z "$running_vm" ]]; then
+        info "No stack is currently running."
+        return 0
+    fi
+    LIMA_VM_NAME="$running_vm"
+    KUBE_CONTEXT="k3s-${LIMA_VM_NAME}"
+
     local do_backup=false
     for arg in "$@"; do
         [[ "$arg" == "--backup" ]] && do_backup=true
     done
 
-    header "Stopping K8s DevOps Stack"
+    header "Stopping K8s DevOps Stack (${LIMA_VM_NAME})"
 
     if $do_backup; then
         info "Backup requested before shutdown"
@@ -275,11 +377,26 @@ cmd_stop() {
 # status
 # ---------------------------------------------------------------------------
 cmd_status() {
-    header "K8s DevOps Stack Status"
-
     require_cmd limactl
     require_cmd kubectl
     require_cmd jq
+
+    local running_vm
+    running_vm=$(detect_running_vm)
+    if [[ -z "$running_vm" ]]; then
+        info "No stack is currently running."
+        info "Available stacks:"
+        list_k3s_vms | while IFS=$'\t' read -r name status; do
+            local domain
+            domain=$(vm_domain "$name")
+            printf "  %-20s (%s)  - %s\n" "$name" "$status" "$domain"
+        done
+        return 0
+    fi
+    LIMA_VM_NAME="$running_vm"
+    KUBE_CONTEXT="k3s-${LIMA_VM_NAME}"
+
+    header "K8s DevOps Stack Status"
 
     # 1. Lima VM status
     printf "${BOLD}Lima VM${NC}\n"
@@ -308,9 +425,30 @@ cmd_status() {
     fi
     echo
 
-    # 3. Resource usage
+    # 3. Resource usage (with color-coded thresholds)
     printf "${BOLD}Resource Usage${NC}\n"
-    kubectl top nodes 2>/dev/null | sed 's/^/  /' || info "  metrics-server not available"
+    local top_output
+    top_output=$(kubectl top nodes --no-headers 2>/dev/null)
+    if [[ -n "$top_output" ]]; then
+        printf "  ${BOLD}%-20s %-12s %-8s %-16s %-8s${NC}\n" "NAME" "CPU(cores)" "CPU(%)" "MEMORY(bytes)" "MEM(%)"
+        while IFS= read -r line; do
+            local node_name cpu_cores cpu_pct mem_bytes mem_pct
+            node_name=$(echo "$line" | awk '{print $1}')
+            cpu_cores=$(echo "$line" | awk '{print $2}')
+            cpu_pct=$(echo "$line" | awk '{print $3}' | tr -d '%')
+            mem_bytes=$(echo "$line" | awk '{print $4}')
+            mem_pct=$(echo "$line" | awk '{print $5}' | tr -d '%')
+            local cpu_color="$GREEN" mem_color="$GREEN"
+            [[ $cpu_pct -ge 80 ]] && cpu_color="$YELLOW"
+            [[ $cpu_pct -ge 90 ]] && cpu_color="$LIGHT_RED"
+            [[ $mem_pct -ge 80 ]] && mem_color="$YELLOW"
+            [[ $mem_pct -ge 90 ]] && mem_color="$LIGHT_RED"
+            printf "  %-20s %-12s ${cpu_color}%-8s${NC} %-16s ${mem_color}%-8s${NC}\n" \
+                "$node_name" "$cpu_cores" "${cpu_pct}%" "$mem_bytes" "${mem_pct}%"
+        done <<< "$top_output"
+    else
+        info "  metrics-server not available"
+    fi
     echo
 
     # 3b. VM disk usage
@@ -326,7 +464,7 @@ cmd_status() {
         local pct_num=${disk_pct%%%}
         local color="$GREEN"
         [[ $pct_num -ge 80 ]] && color="$YELLOW"
-        [[ $pct_num -ge 90 ]] && color="$RED"
+        [[ $pct_num -ge 90 ]] && color="$LIGHT_RED"
         row "Total"     "$disk_size"
         row "Used"      "$disk_used ($disk_pct)" "$color"
         row "Available" "$disk_avail"
@@ -335,19 +473,25 @@ cmd_status() {
     fi
     echo
 
-    # 4. Namespace overview
-    printf "${BOLD}Namespaces${NC}\n"
-    printf "  ${BOLD}%-24s %-8s %-8s %-8s${NC}\n" "NAMESPACE" "TOTAL" "READY" "NOT-READY"
+    # 4. Namespace overview (pod status per namespace)
+    printf "${BOLD}Namespaces${NC} (Pods per namespace)\n"
+    printf "  ${GREEN}green${NC} = all pods healthy, ${YELLOW}yellow${NC} = pods not ready, default = no pods\n"
+    printf "  ${BOLD}%-40s %-8s %-8s %-8s${NC}\n" "NAMESPACE" "PODS" "RUNNING" "PENDING"
     while IFS= read -r ns; do
         local total ready not_ready
         total=$(kubectl get pods -n "$ns" --no-headers 2>/dev/null | wc -l | tr -d ' ')
         ready=$(kubectl get pods -n "$ns" --no-headers 2>/dev/null \
             | awk '$3=="Running" || $3=="Completed" {print}' | wc -l | tr -d ' ')
         not_ready=$((total - ready))
-        local color="$GREEN"
-        [[ $not_ready -gt 0 ]] && color="$YELLOW"
-        [[ $total -eq 0 ]] && color="$NC"
-        printf "  %-24s %-8s ${GREEN}%-8s${NC} ${color}%-8s${NC}\n" \
+        local running_color="$GREEN"
+        local pending_color="$GREEN"
+        if [[ $total -eq 0 ]]; then
+            running_color="$NC"
+            pending_color="$NC"
+        elif [[ $not_ready -gt 0 ]]; then
+            pending_color="$YELLOW"
+        fi
+        printf "  %-40s %-8s ${running_color}%-8s${NC} ${pending_color}%-8s${NC}\n" \
             "$ns" "$total" "$ready" "$not_ready"
     done < <(kubectl get namespaces --no-headers -o custom-columns=":metadata.name" 2>/dev/null)
     echo
@@ -870,6 +1014,166 @@ cmd_extendram() {
 }
 
 # ---------------------------------------------------------------------------
+# Delete Stack
+# ---------------------------------------------------------------------------
+cmd_deletestack() {
+    header "Delete Stack"
+
+    require_cmd limactl
+
+    # List available k3s-* VMs
+    local vms=()
+    local statuses=()
+    while IFS=$'\t' read -r name status; do
+        vms+=("$name")
+        statuses+=("$status")
+    done < <(list_k3s_vms)
+
+    if [[ ${#vms[@]} -eq 0 ]]; then
+        info "No k3s-* Lima VMs found."
+        return 0
+    fi
+
+    printf "${BOLD}Available stacks:${NC}\n"
+    local i
+    for ((i=0; i<${#vms[@]}; i++)); do
+        local domain
+        domain=$(vm_domain "${vms[$i]}")
+        printf "  %d) %-20s (%-10s) - %s\n" "$((i+1))" "${vms[$i]}" "${statuses[$i]}" "$domain"
+    done
+    echo
+
+    local choice
+    read -r -p "Select stack to delete (enter nothing to cancel): " choice
+    if [[ -z "$choice" ]]; then
+        info "Cancelled."
+        return 0
+    fi
+
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 ]] || [[ "$choice" -gt ${#vms[@]} ]]; then
+        err "Invalid selection: ${choice}"
+        return 1
+    fi
+
+    local target_vm="${vms[$((choice-1))]}"
+    local target_status="${statuses[$((choice-1))]}"
+
+    echo
+    warn "You are about to permanently delete VM: ${target_vm}"
+    if [[ "$target_status" == "Running" ]]; then
+        warn "This VM is currently running — it will be stopped first."
+    fi
+    echo
+
+    local confirm
+    read -r -p "Type the VM name to confirm deletion [${target_vm}]: " confirm
+    if [[ "$confirm" != "$target_vm" ]]; then
+        info "Confirmation did not match. Cancelled."
+        return 0
+    fi
+
+    # Stop if running
+    if [[ "$target_status" == "Running" ]]; then
+        info "Stopping VM '${target_vm}'..."
+        limactl stop "$target_vm"
+        ok "VM stopped"
+    fi
+
+    # Delete VM
+    info "Deleting VM '${target_vm}'..."
+    limactl delete "$target_vm"
+    ok "VM '${target_vm}' deleted"
+
+    # Clean up kubeconfig
+    local ctx="k3s-${target_vm}"
+    info "Cleaning up kubeconfig (context: ${ctx})..."
+    kubectl config delete-context "$ctx" &>/dev/null && ok "  Deleted context: ${ctx}" || true
+    kubectl config delete-cluster "$ctx" &>/dev/null && ok "  Deleted cluster: ${ctx}" || true
+    kubectl config delete-user "$ctx" &>/dev/null && ok "  Deleted user: ${ctx}" || true
+
+    ok "Stack '${target_vm}' fully removed"
+}
+
+# ---------------------------------------------------------------------------
+# CF Namespaces
+# ---------------------------------------------------------------------------
+cmd_cfnamespaces() {
+    header "CF Org/Space → Kubernetes Namespace Mapping"
+
+    require_cmd kubectl
+
+    # Orgs
+    printf "  ${BOLD}%-20s %-20s %s${NC}\n" "ORG" "SPACE" "NAMESPACE"
+    printf "  %-20s %-20s %s\n" "----" "-----" "---------"
+
+    while IFS=$'\t' read -r ns org_guid space_guid; do
+        local org_name space_name
+        org_name=$(cf curl "/v3/organizations/${org_guid}" 2>/dev/null | jq -r '.name // "unknown"')
+        space_name=$(cf curl "/v3/spaces/${space_guid}" 2>/dev/null | jq -r '.name // "unknown"')
+        printf "  %-20s %-20s %s\n" "$org_name" "$space_name" "$ns"
+    done < <(kubectl get namespaces -l korifi.cloudfoundry.org/space-guid \
+        -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.korifi\.cloudfoundry\.org/org-guid}{"\t"}{.metadata.labels.korifi\.cloudfoundry\.org/space-guid}{"\n"}{end}' 2>/dev/null)
+
+    echo
+}
+
+# ---------------------------------------------------------------------------
+# Clean Pods
+# ---------------------------------------------------------------------------
+cmd_cleanpods() {
+    header "Cleaning Completed Build Pods"
+
+    require_cmd kubectl
+
+    local total=0
+    while IFS= read -r ns; do
+        local pods
+        pods=$(kubectl get pods -n "$ns" --field-selector=status.phase==Succeeded \
+            --no-headers -o custom-columns=":metadata.name" 2>/dev/null)
+        if [[ -n "$pods" ]]; then
+            local count
+            count=$(echo "$pods" | wc -l | tr -d ' ')
+            kubectl delete pods --field-selector=status.phase==Succeeded -n "$ns" &>/dev/null
+            ok "Deleted ${count} completed pod(s) in ${ns}"
+            total=$((total + count))
+        fi
+    done < <(kubectl get namespaces -l korifi.cloudfoundry.org/space-guid \
+        --no-headers -o custom-columns=":metadata.name" 2>/dev/null)
+
+    if [[ $total -eq 0 ]]; then
+        ok "No completed build pods found"
+    else
+        ok "Cleaned ${total} completed build pod(s) total"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Context
+# ---------------------------------------------------------------------------
+cmd_context() {
+    local ctx
+    ctx=$(kubectl config current-context 2>/dev/null || echo "none")
+    printf "${BOLD}Current kubectl context:${NC} %s\n" "$ctx"
+}
+
+# ---------------------------------------------------------------------------
+# Switch (toggle between cf-admin and k3s-k3s-server)
+# ---------------------------------------------------------------------------
+cmd_switch() {
+    local current target
+    current=$(kubectl config current-context 2>/dev/null || echo "")
+
+    if [[ "$current" == "cf-admin" ]]; then
+        target="$KUBE_CONTEXT"
+    else
+        target="cf-admin"
+    fi
+
+    kubectl config use-context "$target" &>/dev/null
+    ok "Switched kubectl context: ${current} → ${target}"
+}
+
+# ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
 usage() {
@@ -887,6 +1191,11 @@ Commands:
   renewcerts   Force renewal of all TLS certificates
   extenddisk   Extend VM disk size (e.g. extenddisk 300)
   extendram    Change VM memory in GB (e.g. extendram 32)
+  cleanpods    Delete completed kpack build pods
+  cfnamespaces Show CF org/space to K8s namespace mapping
+  context      Show current kubectl context
+  switch       Toggle kubectl context (cf-admin ↔ k3s-k3s-server)
+  deletestack  Stop and permanently delete a k3s-* Lima VM and its kubeconfig
 
 Options:
   --backup    (stop only) Run a Velero backup before stopping
@@ -918,6 +1227,11 @@ main() {
         renewcerts) cmd_renewcerts ;;
         extenddisk) cmd_extenddisk "$@" ;;
         extendram)  cmd_extendram "$@" ;;
+        cleanpods)    cmd_cleanpods ;;
+        cfnamespaces) cmd_cfnamespaces ;;
+        context)      cmd_context ;;
+        switch)       cmd_switch ;;
+        deletestack)  cmd_deletestack ;;
         -h|--help|help)
             usage ;;
         "")

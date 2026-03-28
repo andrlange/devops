@@ -37,6 +37,69 @@ if [[ -f "${K8_DIR}/config.env" ]]; then
 fi
 
 # =============================================================================
+# write_credentials — Generate/update credentials.md with current secrets
+# =============================================================================
+write_credentials() {
+    local cred_file="${SCRIPT_DIR}/../../credentials.md"
+    local domain="${PLATFORM_DOMAIN:-unknown}"
+
+    cat > "$cred_file" <<'CRED_HEADER'
+# Stack Credentials
+
+> WARNING: Development environment only — do not use in production
+
+CRED_HEADER
+
+    echo "Generated: $(date '+%Y-%m-%d %H:%M') | Domain: ${domain}" >> "$cred_file"
+    echo "" >> "$cred_file"
+
+    # Platform Access section
+    cat >> "$cred_file" <<CRED_TABLE
+## Platform Access
+
+| Service | URL | Username | Password |
+|---------|-----|----------|----------|
+CRED_TABLE
+
+    # Phase 1: OpenBao
+    if [[ -n "${OPENBAO_ROOT_TOKEN:-}" ]]; then
+        cat >> "$cred_file" <<PHASE1
+
+## Infrastructure (Phase 1)
+
+| Service | Details |
+|---------|---------|
+| OpenBao Root Token | \`${OPENBAO_ROOT_TOKEN}\` |
+| OpenBao Unseal Key 1 | \`${OPENBAO_UNSEAL_KEY_1:-}\` |
+| OpenBao Unseal Key 2 | \`${OPENBAO_UNSEAL_KEY_2:-}\` |
+| OpenBao Unseal Key 3 | \`${OPENBAO_UNSEAL_KEY_3:-}\` |
+
+PHASE1
+    fi
+
+    # Phase 2: Platform services
+    [[ -n "${ARGOCD_ADMIN_PASSWORD:-}" ]] && \
+        echo "| ArgoCD | https://argocd.${domain} | admin | \`${ARGOCD_ADMIN_PASSWORD}\` |" >> "$cred_file"
+    [[ -n "${GARAGE_ADMIN_KEY:-}" ]] && \
+        echo "| Garage S3 | Admin Key: \`${GARAGE_ADMIN_KEY}\` / Secret: \`${GARAGE_ADMIN_SECRET:-}\` | | |" >> "$cred_file"
+
+    # Phase 3: Monitoring
+    [[ -n "${GRAFANA_ADMIN_PASSWORD:-}" ]] && \
+        echo "| Grafana | https://grafana.${domain} | admin | \`${GRAFANA_ADMIN_PASSWORD}\` |" >> "$cred_file"
+
+    # Phase 4: Services
+    [[ -n "${AK_ADMIN_PASSWORD:-}" ]] && \
+        echo "| artifact-keeper | https://artifactory.${domain} | admin | \`${AK_ADMIN_PASSWORD}\` |" >> "$cred_file"
+
+    # Phase 5: GitLab
+    [[ -n "${GITLAB_ROOT_PASSWORD:-}" ]] && \
+        echo "| GitLab | https://gitlab.${domain} | root | \`${GITLAB_ROOT_PASSWORD}\` |" >> "$cred_file"
+
+    chmod 600 "$cred_file"
+    log_info "Credentials written to ${cred_file}"
+}
+
+# =============================================================================
 # Iteration Zero — Gather all configuration interactively
 # =============================================================================
 cmd_zero() {
@@ -277,6 +340,9 @@ CFGEOF
 
   chmod 600 "$CONFIG_FILE"
   log_success "Configuration saved to $CONFIG_FILE"
+
+  # Persist VM name into config.env so stack.sh picks it up without re-sourcing .install-config
+  sed -i '' "s/^LIMA_VM_NAME=.*/LIMA_VM_NAME=\"${cfg_lima_vm_name}\"/" "${K8_DIR}/config.env"
   echo ""
   log_info "Next steps:"
   echo "  1. Review the configuration:  cat ${CONFIG_FILE}"
@@ -312,24 +378,20 @@ install_phase_1() {
   if ! component_is_installed "LIMA_K3S" "$STATE_FILE"; then
     log_step "1.1 — Lima VM + K3s"
 
-    if limactl list --json 2>/dev/null | grep -q "\"name\":\"${LIMA_VM_NAME}\""; then
-      log_info "Lima VM '${LIMA_VM_NAME}' already exists"
-      local vm_status
-      vm_status=$(limactl list --json 2>/dev/null \
-        | grep "\"name\":\"${LIMA_VM_NAME}\"" \
-        | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['status'])" 2>/dev/null || echo "unknown")
-      if [[ "$vm_status" != "Running" ]]; then
-        log_info "Starting Lima VM..."
-        limactl start "$LIMA_VM_NAME"
-      else
-        log_info "Lima VM already running"
-      fi
-    else
-      log_info "Creating Lima VM '${LIMA_VM_NAME}'..."
-      limactl create --name="$LIMA_VM_NAME" "${K8_DIR}/bootstrap/lima.yaml"
-      limactl start "$LIMA_VM_NAME"
-      log_success "Lima VM created and started"
+    # Check if VM name already exists (prevent accidental overwrite)
+    if limactl list --json 2>/dev/null | jq -e --arg name "$LIMA_VM_NAME" 'select(.name == $name)' &>/dev/null; then
+      log_error "Lima VM '${LIMA_VM_NAME}' already exists."
+      log_error "Choose a different name or delete the existing VM with:"
+      log_error "  limactl delete ${LIMA_VM_NAME}"
+      log_error "  or: ./k8/stack.sh deletestack"
+      exit 1
     fi
+
+    # Create new VM
+    log_info "Creating Lima VM '${LIMA_VM_NAME}'..."
+    limactl create --name="$LIMA_VM_NAME" "${K8_DIR}/bootstrap/lima.yaml"
+    limactl start "$LIMA_VM_NAME"
+    log_success "Lima VM created and started"
 
     # Get VM IP
     VM_IP=$(limactl shell "$LIMA_VM_NAME" hostname -I | awk '{print $1}')
@@ -532,6 +594,19 @@ REGEOF
     fi
 
     mark_component_installed "METALLB" "$STATE_FILE"
+
+    log_info ""
+    log_info "=============================================="
+    log_info "  DNS Configuration Required"
+    log_info "=============================================="
+    log_info ""
+    log_info "  Add these DNS records to your DNS provider:"
+    log_info ""
+    log_info "  *.${PLATFORM_DOMAIN}  ->  A  192.168.64.200"
+    log_info "  *.${APPS_DOMAIN}      ->  A  192.168.64.203"
+    log_info ""
+    log_info "=============================================="
+    log_info ""
   else
     log_info "MetalLB already installed, skipping"
   fi
@@ -615,6 +690,7 @@ REGEOF
     log_info "Kubernetes Reflector already installed, skipping"
   fi
 
+  write_credentials
   mark_phase_complete 1 "$STATE_FILE"
   log_success "Phase 1 — Foundation complete"
   echo ""
@@ -769,6 +845,7 @@ install_phase_2() {
     log_info "Velero UI already installed, skipping"
   fi
 
+  write_credentials
   mark_phase_complete 2 "$STATE_FILE"
   log_success "Phase 2 — Platform complete"
   echo ""
@@ -917,6 +994,7 @@ install_phase_3() {
     log_info "Grafana already installed, skipping"
   fi
 
+  write_credentials
   mark_phase_complete 3 "$STATE_FILE"
   log_success "Phase 3 — Monitoring complete"
   echo ""
@@ -982,6 +1060,7 @@ install_phase_4() {
     mark_component_installed "phase4_artifact_keeper" "$STATE_FILE"
   fi
 
+  write_credentials
   mark_phase_complete 4 "$STATE_FILE"
   log_success "Phase 4 complete — artifact-keeper available at https://artifacts.${PLATFORM_DOMAIN:-development.cfapps.cool}"
   echo ""
@@ -1107,6 +1186,7 @@ install_phase_5() {
     mark_component_installed "phase5_runner" "$STATE_FILE"
   fi
 
+  write_credentials
   mark_phase_complete 5 "$STATE_FILE"
   echo ""
   log_success "Phase 5 complete"
@@ -1634,6 +1714,7 @@ CRBEOF
     mark_component_installed "phase6_cf_admin" "$STATE_FILE"
   fi
 
+  write_credentials
   mark_phase_complete 6 "$STATE_FILE"
   echo ""
   log_success "Phase 6 complete — Cloud Foundry (Korifi)"
@@ -1712,6 +1793,32 @@ install_phase_7() {
     mark_component_installed "phase7_secrets" "$STATE_FILE"
   fi
 
+  # --- Garage Admin Token ---
+  if ! component_is_installed "phase7_garage_admin_token" "$STATE_FILE"; then
+    log_step "Configuring Garage admin token..."
+
+    local GARAGE_TOKEN
+    GARAGE_TOKEN=$(openssl rand -hex 32)
+
+    # Store in OpenBao
+    kubectl exec -n openbao openbao-0 -- bao kv put secret/garage/admin-token \
+      token="${GARAGE_TOKEN}" 2>&1 | tail -1
+
+    # Update Garage ConfigMap with token
+    sed "s/GARAGE_ADMIN_TOKEN_PLACEHOLDER/${GARAGE_TOKEN}/g" \
+      "${K8_DIR}/platform/garage/configmap.yaml" | kubectl apply -f - 2>&1 | tail -1
+
+    # Restart Garage to pick up new config
+    kubectl rollout restart statefulset/garage -n garage 2>&1 | tail -1
+    wait_for_pods "garage" 120
+
+    # Apply ExternalSecret so ESO syncs token to cf-services namespace
+    kubectl apply -f "${K8_DIR}/services/cf-service-broker/externalsecret-garage.yaml" 2>&1 | tail -1
+
+    log_success "Garage admin token configured"
+    mark_component_installed "phase7_garage_admin_token" "$STATE_FILE"
+  fi
+
   # --- Build and push broker image ---
   if ! component_is_installed "phase7_broker_build" "$STATE_FILE"; then
     log_step "Building CF Service Broker..."
@@ -1726,7 +1833,7 @@ install_phase_7() {
         -o "${BUILD_DIR}/broker" . 2>&1 | tail -1
 
       local BROKER_REGISTRY="${REGISTRY:-artifactory.cfapps.cool}/docker-local"
-      local BROKER_IMAGE="${BROKER_REGISTRY}/cf-service-broker:1.2.0-arm64"
+      local BROKER_IMAGE="${BROKER_REGISTRY}/cf-service-broker:1.3.0-arm64"
       local BASE_IMAGE="gcr.io/distroless/static:nonroot"
       local TMPDIR_IMG LAYER
       TMPDIR_IMG=$(mktemp -d)
@@ -1779,6 +1886,7 @@ install_phase_7() {
     cf enable-service-access postgresql 2>&1 | tail -1
     cf enable-service-access valkey 2>&1 | tail -1
     cf enable-service-access rabbitmq 2>&1 | tail -1
+    cf enable-service-access s3 2>&1 | tail -1
 
     # Switch back
     kubectl config use-context k3s-devops 2>/dev/null || true
@@ -1787,6 +1895,7 @@ install_phase_7() {
     mark_component_installed "phase7_broker_register" "$STATE_FILE"
   fi
 
+  write_credentials
   mark_phase_complete 7 "$STATE_FILE"
   echo ""
   log_success "Phase 7 complete — CF Service Brokers"
@@ -1795,11 +1904,243 @@ install_phase_7() {
   echo -e "    postgresql   small, medium   PostgreSQL 18 via CloudNativePG"
   echo -e "    valkey       small           Valkey (Redis-compatible)"
   echo -e "    rabbitmq     small           RabbitMQ message broker"
+  echo -e "    s3           default         S3-compatible object storage (Garage)"
   echo ""
   echo -e "  ${BOLD}Usage:${NC}"
   echo -e "    cf marketplace"
   echo -e "    cf create-service postgresql small my-db"
   echo -e "    cf bind-service my-app my-db"
+  echo ""
+}
+
+# =============================================================================
+# Phase 8 — kappman (Korifi App Manager)
+# =============================================================================
+# Spring Boot app deployed via cf push with auto-configured Korifi integration
+# =============================================================================
+install_phase_8() {
+  log_phase "Phase 8 — kappman (Korifi App Manager)"
+  if [[ -f "$CONFIG_FILE" ]]; then
+    source "$CONFIG_FILE"
+  fi
+  export KUBECONFIG="${HOME}/.kube/config-k3s"
+
+  # Load APPS_DOMAIN from config.env if not in install-config
+  local KAPPMAN_CONFIG_ENV
+  KAPPMAN_CONFIG_ENV="$(cd "$(dirname "$0")/.." && pwd)/k8/config.env"
+  if [[ -f "$KAPPMAN_CONFIG_ENV" ]]; then
+    source "$KAPPMAN_CONFIG_ENV"
+  fi
+  local CF_DOMAIN="${APPS_DOMAIN:-app.cfapps.cool}"
+  local KAPPMAN_DIR
+  KAPPMAN_DIR="$(cd "$(dirname "$0")/.." && pwd)/apps/kappman"
+
+  if [[ ! -d "$KAPPMAN_DIR" ]]; then
+    log_error "kappman source not found at $KAPPMAN_DIR"
+    exit 1
+  fi
+
+  # --- Ensure Korifi is installed (check state file OR live cluster) ---
+  if ! phase_is_complete 6 "$STATE_FILE"; then
+    # Fallback: check if Korifi is actually running
+    if ! kubectl get deployment -n korifi korifi-api-deployment >/dev/null 2>&1; then
+      log_error "Phase 6 (Korifi) must be installed first"
+      exit 1
+    fi
+    log_info "Korifi detected in cluster (no state file)"
+  fi
+
+  # --- Create kappman ServiceAccount with Korifi admin privileges ---
+  if ! component_is_installed "phase8_sa" "$STATE_FILE"; then
+    log_step "Creating kappman-cf-admin ServiceAccount..."
+
+    # ServiceAccount in korifi namespace
+    kubectl create serviceaccount kappman-cf-admin -n korifi 2>/dev/null || true
+
+    # ClusterRoleBinding for korifi-controllers-admin
+    kubectl create clusterrolebinding kappman-cf-admin-binding \
+      --clusterrole=korifi-controllers-admin \
+      --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
+
+    # Add RoleBindings to cf root namespace
+    kubectl create rolebinding kappman-admin -n cf \
+      --clusterrole=korifi-controllers-admin \
+      --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
+    kubectl create rolebinding kappman-root-ns-user -n cf \
+      --clusterrole=korifi-controllers-root-namespace-user \
+      --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
+
+    # Add RoleBindings to all existing CF org/space namespaces
+    for ns in $(kubectl get rolebindings -A -o json 2>/dev/null | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+namespaces = set()
+for item in data['items']:
+    for s in item.get('subjects', []):
+        if s.get('name') == 'cf-admin':
+            namespaces.add(item['metadata']['namespace'])
+for ns in sorted(namespaces):
+    print(ns)
+" 2>/dev/null); do
+      kubectl create rolebinding kappman-admin -n "$ns" \
+        --clusterrole=korifi-controllers-admin \
+        --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
+      kubectl create rolebinding kappman-org-user -n "$ns" \
+        --clusterrole=korifi-controllers-organization-user \
+        --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
+      kubectl create rolebinding kappman-space-dev -n "$ns" \
+        --clusterrole=korifi-controllers-space-developer \
+        --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
+    done
+
+    log_success "kappman-cf-admin ServiceAccount created with Korifi admin privileges"
+    mark_component_installed "phase8_sa" "$STATE_FILE"
+  fi
+
+  # --- Generate long-lived token (requires cluster-admin context) ---
+  log_step "Generating Korifi API token..."
+  local CF_TOKEN
+  CF_TOKEN=$(kubectl --context=k3s-devops create token kappman-cf-admin -n korifi --duration=8760h 2>/dev/null \
+    || kubectl create token kappman-cf-admin -n korifi --duration=8760h)
+  log_success "Token generated (valid for 1 year)"
+
+  # --- Switch to cf-admin context for CF CLI operations ---
+  kubectl config use-context cf-admin 2>/dev/null
+
+  # --- Login to CF ---
+  log_step "Logging in to CF API..."
+  cf api "https://api.${CF_DOMAIN}" --skip-ssl-validation 2>&1 | tail -1
+  cf auth cf-admin 2>&1 | tail -1
+
+  # --- Create kappman org and space (idempotent) ---
+  if ! component_is_installed "phase8_org_space" "$STATE_FILE"; then
+    log_step "Creating kappman org and space..."
+
+    if ! cf org kappman >/dev/null 2>&1; then
+      cf create-org kappman 2>&1 | tail -1
+    else
+      log_info "Org 'kappman' already exists"
+    fi
+
+    cf target -o kappman 2>&1 | tail -1
+
+    if ! cf space app >/dev/null 2>&1; then
+      cf create-space app 2>&1 | tail -1
+    else
+      log_info "Space 'app' already exists"
+    fi
+
+    cf target -o kappman -s app 2>&1 | tail -1
+
+    # Grant kappman SA access to the new org/space namespaces
+    sleep 3  # Wait for Korifi to create the namespaces
+    for ns in $(kubectl get ns -o name 2>/dev/null | grep -v '^namespace/kube\|^namespace/default\|^namespace/local' | sed 's|namespace/||'); do
+      kubectl create rolebinding kappman-admin -n "$ns" \
+        --clusterrole=korifi-controllers-admin \
+        --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
+      kubectl create rolebinding kappman-org-user -n "$ns" \
+        --clusterrole=korifi-controllers-organization-user \
+        --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
+      kubectl create rolebinding kappman-space-dev -n "$ns" \
+        --clusterrole=korifi-controllers-space-developer \
+        --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
+    done
+
+    log_success "Org 'kappman' / Space 'app' ready"
+    mark_component_installed "phase8_org_space" "$STATE_FILE"
+  fi
+
+  cf target -o kappman -s app 2>&1 | tail -1
+
+  # --- Create PostgreSQL service for kappman ---
+  if ! component_is_installed "phase8_db" "$STATE_FILE"; then
+    log_step "Creating PostgreSQL service for kappman..."
+
+    if ! cf service kappman-db >/dev/null 2>&1; then
+      cf create-service postgresql small kappman-db 2>&1 | tail -1
+
+      log_step "Waiting for kappman-db service to be ready..."
+      local retries=0
+      while [[ $retries -lt 60 ]]; do
+        local svc_status
+        svc_status=$(cf service kappman-db 2>/dev/null | grep "status:" | awk '{print $NF}' || echo "pending")
+        if [[ "$svc_status" == "succeeded" ]]; then
+          break
+        fi
+        retries=$((retries + 1))
+        sleep 5
+      done
+    else
+      log_info "Service 'kappman-db' already exists"
+    fi
+
+    log_success "PostgreSQL service 'kappman-db' ready"
+    mark_component_installed "phase8_db" "$STATE_FILE"
+  fi
+
+  # --- Build kappman JAR ---
+  if ! component_is_installed "phase8_build" "$STATE_FILE"; then
+    log_step "Building kappman JAR..."
+    pushd "$KAPPMAN_DIR" > /dev/null
+    ./gradlew bootJar 2>&1 | tail -3
+    popd > /dev/null
+
+    if [[ ! -f "${KAPPMAN_DIR}/build/libs/kappman-0.0.1-SNAPSHOT.jar" ]]; then
+      log_error "Build failed — JAR not found"
+      exit 1
+    fi
+
+    log_success "kappman JAR built"
+    mark_component_installed "phase8_build" "$STATE_FILE"
+  fi
+
+  # --- Push kappman to Korifi ---
+  if ! component_is_installed "phase8_push" "$STATE_FILE"; then
+    log_step "Pushing kappman to Korifi..."
+    pushd "$KAPPMAN_DIR" > /dev/null
+    cf push 2>&1 | tail -5
+    popd > /dev/null
+
+    log_success "kappman pushed to Korifi"
+    mark_component_installed "phase8_push" "$STATE_FILE"
+  fi
+
+  # --- Set CF_PASSWORD (Korifi API token) ---
+  log_step "Configuring Korifi API token..."
+  cf set-env kappman CF_PASSWORD "$CF_TOKEN" 2>&1 | tail -1
+
+  # --- Set PostgreSQL datasource from service binding ---
+  log_step "Restarting kappman with configuration..."
+  cf restart kappman 2>&1 | tail -3
+
+  # --- Verify ---
+  log_step "Verifying kappman deployment..."
+  sleep 10
+  local health_status
+  health_status=$(curl -sk "https://kappman.${CF_DOMAIN}/actuator/health" 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('status','UNKNOWN'))" 2>/dev/null || echo "UNREACHABLE")
+
+  if [[ "$health_status" == "UP" ]]; then
+    log_success "kappman is healthy"
+  else
+    log_warn "kappman health check returned: $health_status (may need time to start)"
+  fi
+
+  # Switch back to k3s-devops context
+  kubectl config use-context k3s-devops 2>/dev/null
+
+  write_credentials
+  mark_phase_complete 8 "$STATE_FILE"
+  echo ""
+  log_success "Phase 8 complete — kappman (Korifi App Manager)"
+  echo ""
+  echo -e "  ${BOLD}URL:${NC}       https://kappman.${CF_DOMAIN}"
+  echo -e "  ${BOLD}Login:${NC}     admin / change_me"
+  echo -e "  ${BOLD}Version:${NC}   V1.0.0"
+  echo ""
+  echo -e "  ${BOLD}Features:${NC}"
+  echo -e "    Dashboard, Organizations, Spaces, Applications"
+  echo -e "    Services, Marketplace, Buildpacks, Korifi Status"
+  echo -e "    User Management (Admin)"
   echo ""
 }
 
@@ -1818,8 +2159,10 @@ cmd_status() {
     "Services (artifact-keeper, PostgreSQL, Meilisearch)"
     "GitLab CE"
     "Cloud Foundry / Korifi [OPTIONAL]"
+    "CF Service Brokers [OPTIONAL]"
+    "kappman — Korifi App Manager [OPTIONAL]"
   )
-  for i in 1 2 3 4 5 6; do
+  for i in 1 2 3 4 5 6 7 8; do
     local status_color="$RED"
     local status_text="Not installed"
     if phase_is_complete "$i" "$STATE_FILE"; then
@@ -1862,6 +2205,12 @@ cmd_status() {
       "phase6_servicebinding:Service Binding Runtime"
       "phase6_namespaces:CF Namespaces"
       "phase6_korifi:Korifi"
+      "phase7_cnpg:CloudNativePG"
+      "phase7_rabbitmq_operator:RabbitMQ Operator"
+      "phase8_sa:kappman ServiceAccount"
+      "phase8_org_space:kappman Org/Space"
+      "phase8_db:kappman Database"
+      "phase8_push:kappman Deployment"
     )
     for entry in "${components[@]}"; do
       local key="${entry%%:*}"
@@ -1990,13 +2339,15 @@ Usage: $(basename "$0") <command> [args]
 ${BOLD}Commands:${NC}
   ${CYAN}(none)${NC}          Interactive full setup (zero + all phases)
   ${CYAN}zero${NC}            Iteration Zero — gather all configuration interactively
-  ${CYAN}phase <N>${NC}       Install a specific phase (1-6):
+  ${CYAN}phase <N>${NC}       Install a specific phase (1-8):
                     1: Foundation (Lima, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager)
                     2: Platform (ArgoCD, Portainer, Garage, Technitium, Velero)
                     3: Monitoring (Loki, Mimir, Tempo, Alloy, KSM, node-exporter, Grafana)
                     4: Services (artifact-keeper, PostgreSQL, Meilisearch)
                     5: GitLab CE
                     6: Cloud Foundry / Korifi [OPTIONAL] (requires phases 1-3)
+                    7: CF Service Brokers [OPTIONAL] (requires phase 6)
+                    8: kappman — Korifi App Manager [OPTIONAL] (requires phases 6+7)
   ${CYAN}status${NC}          Show installation status and service health
   ${CYAN}validate${NC}        Validate all prerequisites
 
@@ -2042,8 +2393,9 @@ main() {
         5) install_phase_5 ;;
         6) install_phase_6 ;;
         7) install_phase_7 ;;
+        8) install_phase_8 ;;
         *)
-          log_error "Unknown phase: $phase_num (valid: 1-6)"
+          log_error "Unknown phase: $phase_num (valid: 1-8)"
           exit 1
           ;;
       esac

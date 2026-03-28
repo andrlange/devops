@@ -24,3 +24,4 @@ data:
 
     [admin]
     api_bind_addr = "[::]:3903"
+    admin_token = "GARAGE_ADMIN_TOKEN_PLACEHOLDER"

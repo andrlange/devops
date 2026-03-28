@@ -58,7 +58,7 @@ spec:
         - name: artifact-keeper-pull
       containers:
         - name: broker
-          image: artifactory.cfapps.cool/docker-local/cf-service-broker:1.2.0-arm64
+          image: artifactory.cfapps.cool/docker-local/cf-service-broker:1.3.0-arm64
           ports:
             - containerPort: 8080
           env:
@@ -70,6 +70,15 @@ spec:
               value: "cf-services"
             - name: VALKEY_IMAGE
               value: "valkey/valkey:8.1-alpine"
+            - name: GARAGE_ADMIN_URL
+              value: "http://garage.garage.svc.cluster.local:3903"
+            - name: GARAGE_S3_ENDPOINT
+              value: "http://garage.garage.svc.cluster.local:3900"
+            - name: GARAGE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: garage-admin-token
+                  key: token
           resources:
             requests:
               cpu: 50m

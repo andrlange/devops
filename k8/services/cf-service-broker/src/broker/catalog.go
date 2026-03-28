@@ -13,6 +13,9 @@ const (
 	PostgreSQLMediumPlanID = "a1b2c3d4-1111-1111-1111-000000000002"
 	ValkeySmallPlanID      = "a1b2c3d4-2222-2222-2222-000000000001"
 	RabbitMQSmallPlanID    = "a1b2c3d4-3333-3333-3333-000000000001"
+
+	S3ServiceID         = "a4d8f2b1-6e3c-4f7a-8b9d-5c1e3a7f2d4b"
+	S3DefaultPlanID     = "b5e9a3c2-7f4d-5a8b-9c0e-6d2f4b8a1c5e"
 )
 
 func serviceCatalog() []domain.Service {
@@ -66,6 +69,22 @@ func serviceCatalog() []domain.Service {
 					ID:          RabbitMQSmallPlanID,
 					Name:        "small",
 					Description: "1 instance, 256Mi RAM, 1Gi storage",
+					Free:        domain.FreeValue(true),
+				},
+			},
+			PlanUpdatable: false,
+		},
+		{
+			ID:          S3ServiceID,
+			Name:        "s3",
+			Description: "S3-compatible object storage powered by Garage",
+			Bindable:    true,
+			Tags:        []string{"s3", "object-storage", "garage"},
+			Plans: []domain.ServicePlan{
+				{
+					ID:          S3DefaultPlanID,
+					Name:        "default",
+					Description: "Dedicated S3 bucket with read/write access",
 					Free:        domain.FreeValue(true),
 				},
 			},
