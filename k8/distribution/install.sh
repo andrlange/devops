@@ -1004,11 +1004,11 @@ install_phase_3() {
   # --- 3.2 Mimir ---
   if ! component_is_installed "MIMIR" "$STATE_FILE"; then
     log_step "3.2 — Mimir"
-    ensure_namespace "monitoring"
+    ensure_namespace "mimir"
 
     if [[ -d "${K8_DIR}/monitoring/mimir" ]]; then
-      smart_install "mimir" "${K8_DIR}/monitoring/mimir" "monitoring"
-      wait_for_pods "monitoring" 180 || true
+      smart_install "mimir" "${K8_DIR}/monitoring/mimir" "mimir"
+      wait_for_pods "mimir" 180
       log_success "Mimir installed"
     else
       log_warn "Mimir chart not found at ${K8_DIR}/monitoring/mimir — skipping"
