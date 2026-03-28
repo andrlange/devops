@@ -316,6 +316,60 @@ The **only manual prerequisite** is DNS provider setup (GCP/AWS service account 
 - No secrets in stack.tgz
 - OpenBao unseal keys only in credentials.md (never in git)
 
+## Multi-Stack Support (Lima VM Isolation)
+
+Multiple stack instances can coexist on the same Mac (e.g., production domain + test domain). Each gets its own Lima VM. Only one can run at a time (MetalLB IPs would conflict).
+
+### install.sh Changes
+
+- Default Lima VM name: `k3s-server` (configurable during Iteration Zero)
+- **Pre-flight check:** If a Lima VM with the chosen name already exists, abort with:
+  `"Lima VM '<name>' already exists. Choose a different name or delete it with: limactl delete <name>"`
+- VM name is stored in `.install-config` and `config.env`
+
+### stack.sh Changes
+
+**`stack.sh start`:**
+1. Detect all Lima VMs matching pattern `k3s-*` via `limactl list --json`
+2. If exactly one: use it automatically
+3. If multiple: present selection menu:
+   ```
+   Multiple stacks found:
+     1) k3s-server    (Stopped)  - development.cfapps.cool
+     2) k3s-test      (Stopped)  - development.example.com
+   Select stack [1]:
+   ```
+4. Start selected VM, set kubeconfig context to `k3s-<vm-name>`
+
+**`stack.sh stop`:**
+1. Detect currently running Lima VM (status=Running, pattern `k3s-*`)
+2. If exactly one running: stop it
+3. If none running: "No stack is currently running."
+
+**`stack.sh status`:**
+1. Same auto-detection as `stop` — find the running `k3s-*` VM
+2. If none running: list all available VMs with their status
+
+### Testing Workflow
+
+```bash
+# 1. Stop existing stack
+./k8/stack.sh stop
+
+# 2. Run installer with test domain — choose VM name "k3s-test"
+./installer.sh                    # unpack stack.tgz
+cd ~/devops-stack/k8/distribution
+./install.sh                      # Iteration Zero: VM name=k3s-test, domain=test.example.com
+
+# 3. Test the stack
+./k8/stack.sh status              # auto-detects k3s-test
+
+# 4. Clean up and restore original
+./k8/stack.sh stop
+limactl delete k3s-test
+./k8/stack.sh start               # auto-detects k3s-server, or select from menu
+```
+
 ## Network Requirements
 
 - Unrestricted internet access required during installation (Homebrew, Docker Hub, Helm repos, K3s installer, Let's Encrypt)
