@@ -1703,18 +1703,15 @@ install_phase_6() {
     local CONTOUR_REGISTRY="${REGISTRY:-artifactory.cfapps.cool}/${REGISTRY_REPO:-docker-local}"
     local APPS_LB_IP="$(get_metallb_apps_ip)"
 
-    # Fix Gateway API CRD storedVersions conflict (K3s bundles v1, Contour expects v1alpha3)
-    for crd in backendtlspolicies.gateway.networking.k8s.io; do
-      if kubectl get crd "$crd" &>/dev/null; then
-        kubectl get crd "$crd" -o json \
-          | jq '.status.storedVersions = [.spec.versions[0].name]' \
-          | kubectl replace --raw "/apis/apiextensions.k8s.io/v1/customresourcedefinitions/${crd}/status" -f - >/dev/null 2>&1 || true
-      fi
-    done
-
-    # Install Contour via official manifests + patch for local images and MetalLB
-    kubectl apply --server-side --force-conflicts \
-      -f https://projectcontour.io/quickstart/contour-gateway-provisioner.yaml 2>&1 | tail -5
+    # Install Contour gateway provisioner — filter out CRD resources to avoid
+    # storedVersions conflicts with K3s-bundled Gateway API CRDs.
+    # Uses awk to split YAML docs and skip any that are CustomResourceDefinition.
+    curl -sfL https://projectcontour.io/quickstart/contour-gateway-provisioner.yaml \
+      | awk '
+        /^---/ { if (doc && doc !~ /kind: CustomResourceDefinition/) print doc; doc="---\n"; next }
+        { doc = doc $0 "\n" }
+        END { if (doc && doc !~ /kind: CustomResourceDefinition/) print doc }
+      ' | kubectl apply -f - 2>&1 | tail -5
 
     # Create GatewayClass (required before Gateway)
     kubectl apply -f - <<GCEOF
