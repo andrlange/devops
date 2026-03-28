@@ -709,6 +709,12 @@ POLICY' >/dev/null 2>&1
 
     mark_component_installed "METALLB" "$STATE_FILE"
 
+    # Extract first IP from MetalLB range (platform/Traefik) and +3 for apps/Contour
+    local metallb_first_ip="${METALLB_IP_RANGE%%-*}"
+    local ip_base="${metallb_first_ip%.*}"
+    local ip_last_octet="${metallb_first_ip##*.}"
+    local apps_ip="${ip_base}.$((ip_last_octet + 3))"
+
     log_info ""
     log_info "=============================================="
     log_info "  DNS Configuration Required"
@@ -716,11 +722,14 @@ POLICY' >/dev/null 2>&1
     log_info ""
     log_info "  Add these DNS records to your DNS provider:"
     log_info ""
-    log_info "  *.${PLATFORM_DOMAIN}  ->  A  192.168.64.200"
-    log_info "  *.${APPS_DOMAIN}      ->  A  192.168.64.203"
+    log_info "  *.${PLATFORM_DOMAIN}  ->  A  ${metallb_first_ip}"
+    log_info "  *.${APPS_DOMAIN}      ->  A  ${apps_ip}"
+    log_info ""
+    log_info "  (MetalLB assigns IPs sequentially from ${METALLB_IP_RANGE})"
     log_info ""
     log_info "=============================================="
     log_info ""
+    read -rp "  Press ENTER when DNS records have been configured... " </dev/tty
   else
     log_info "MetalLB already installed, skipping"
   fi
@@ -1348,10 +1357,10 @@ install_phase_6() {
       -n projectcontour \
       --set contour.gatewayAPIEnabled=true \
       --set envoy.service.type=LoadBalancer \
-      --set envoy.service.annotations."metallb\.universe\.tf/loadBalancerIPs"="192.168.64.203" \
+      --set envoy.service.annotations."metallb\.universe\.tf/loadBalancerIPs"="${CONTOUR_IP:-${ip_base:-192.168.64}.$((${ip_last_octet:-200} + 3))}" \
       2>&1 | tail -3
     wait_for_pods "projectcontour" 120
-    log_success "Contour installed on 192.168.64.203"
+    log_success "Contour installed"
     mark_component_installed "phase6_contour" "$STATE_FILE"
   fi
 
