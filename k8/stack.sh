@@ -646,9 +646,22 @@ auto_unseal_openbao() {
     fi
 
     info "Auto-unsealing OpenBao..."
-    # Extract unseal keys from unseal.sh (lines with 'bao operator unseal')
-    local keys
-    keys=$(grep 'bao operator unseal' "$unseal_script" | sed 's/.*unseal //' | tr -d '\r')
+    local keys=""
+    # Try unseal.sh first (legacy), then openbao_credentials.md
+    if [[ -f "$unseal_script" ]]; then
+        keys=$(grep 'bao operator unseal' "$unseal_script" | sed 's/.*unseal //' | tr -d '\r')
+    fi
+    if [[ -z "$keys" ]]; then
+        # Try openbao_credentials.md (new format from distribution installer)
+        local cred_file="${SCRIPT_DIR}/../openbao_credentials.md"
+        if [[ -f "$cred_file" ]]; then
+            keys=$(grep '| Key [0-9]' "$cred_file" | sed 's/.*`\(.*\)`.*/\1/' | head -3)
+        fi
+    fi
+    if [[ -z "$keys" ]]; then
+        warn "No unseal keys found (checked unseal.sh and openbao_credentials.md)"
+        return
+    fi
     while IFS= read -r key; do
         [[ -z "$key" ]] && continue
         kubectl exec -n openbao "$pod" -- bao operator unseal "$key" &>/dev/null || true

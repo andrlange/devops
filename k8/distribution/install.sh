@@ -42,58 +42,81 @@ fi
 write_credentials() {
     local cred_file="${K8_DIR}/../credentials.md"
     local domain="${PLATFORM_DOMAIN:-unknown}"
+    local apps_domain="${APPS_DOMAIN:-app.cfapps.cool}"
 
-    cat > "$cred_file" <<'CRED_HEADER'
+    # Try to read credentials from OpenBao if available
+    local BAO_GET="kubectl exec -n openbao openbao-0 -- bao kv get -field"
+    local argocd_pw="${ARGOCD_ADMIN_PASSWORD:-$(${BAO_GET}=password secret/argocd/admin 2>/dev/null || echo "")}"
+    local grafana_pw="${GRAFANA_ADMIN_PASSWORD:-$(${BAO_GET}=password secret/grafana/admin 2>/dev/null || echo "")}"
+    local ak_pw="${AK_ADMIN_PASSWORD:-$(${BAO_GET}=admin_password secret/artifact-keeper/app 2>/dev/null || echo "")}"
+    local gitlab_pw="${GITLAB_ROOT_PASSWORD:-$(${BAO_GET}=root_password secret/gitlab/admin 2>/dev/null || echo "")}"
+    local garage_token="${GARAGE_ADMIN_TOKEN:-$(${BAO_GET}=token secret/garage/admin-token 2>/dev/null || echo "")}"
+    local garage_ak="${GARAGE_ADMIN_KEY:-$(${BAO_GET}=access_key secret/garage/admin 2>/dev/null || echo "")}"
+    local garage_sk="${GARAGE_ADMIN_SECRET:-$(${BAO_GET}=secret_key secret/garage/admin 2>/dev/null || echo "")}"
+
+    cat > "$cred_file" <<CRED_EOF
 # Stack Credentials
 
 > WARNING: Development environment only — do not use in production
+> OpenBao unseal keys are stored separately in openbao_credentials.md
 
-CRED_HEADER
+Generated: $(date '+%Y-%m-%d %H:%M')
+Platform Domain: ${domain}
+Apps Domain: ${apps_domain}
 
-    echo "Generated: $(date '+%Y-%m-%d %H:%M') | Domain: ${domain}" >> "$cred_file"
-    echo "" >> "$cred_file"
+## Platform Services
 
-    # Platform Access section
-    cat >> "$cred_file" <<CRED_TABLE
-## Platform Access
+| Service | URL | Username | Password/Token |
+|---------|-----|----------|----------------|
+| ArgoCD | https://argocd.${domain} | admin | \`${argocd_pw:-not yet set}\` |
+| Portainer | https://portainer.${domain} | admin | Set on first login |
+| Grafana | https://grafana.${domain} | admin | \`${grafana_pw:-not yet set}\` |
+| Technitium DNS | https://dns.${domain} | admin | Set on first login |
 
-| Service | URL | Username | Password |
-|---------|-----|----------|----------|
-CRED_TABLE
-
-    # Phase 1: OpenBao
-    if [[ -n "${OPENBAO_ROOT_TOKEN:-}" ]]; then
-        cat >> "$cred_file" <<PHASE1
-
-## Infrastructure (Phase 1)
+## Infrastructure
 
 | Service | Details |
 |---------|---------|
-| OpenBao Root Token | \`${OPENBAO_ROOT_TOKEN}\` |
-| OpenBao Unseal Key 1 | \`${OPENBAO_UNSEAL_KEY_1:-}\` |
-| OpenBao Unseal Key 2 | \`${OPENBAO_UNSEAL_KEY_2:-}\` |
-| OpenBao Unseal Key 3 | \`${OPENBAO_UNSEAL_KEY_3:-}\` |
+| Garage S3 Admin Token | \`${garage_token:-not yet set}\` |
+| Garage S3 Admin Key | \`${garage_ak:-not yet set}\` |
+| Garage S3 Admin Secret | \`${garage_sk:-not yet set}\` |
+| S3 Endpoint | http://garage.garage.svc:3900 (in-cluster) |
+| S3 Region | garage |
 
-PHASE1
-    fi
+## Application Services
 
-    # Phase 2: Platform services
-    [[ -n "${ARGOCD_ADMIN_PASSWORD:-}" ]] && \
-        echo "| ArgoCD | https://argocd.${domain} | admin | \`${ARGOCD_ADMIN_PASSWORD}\` |" >> "$cred_file"
-    [[ -n "${GARAGE_ADMIN_KEY:-}" ]] && \
-        echo "| Garage S3 | Admin Key: \`${GARAGE_ADMIN_KEY}\` / Secret: \`${GARAGE_ADMIN_SECRET:-}\` | | |" >> "$cred_file"
+| Service | URL | Username | Password/Token |
+|---------|-----|----------|----------------|
+| artifact-keeper | https://artifacts.${domain} | admin | \`${ak_pw:-not yet set}\` |
+| GitLab CE | https://gitlab.${domain} | root | \`${gitlab_pw:-not yet set}\` |
+| GitLab SSH | ssh://git@192.168.64.202:22 | | |
 
-    # Phase 3: Monitoring
-    [[ -n "${GRAFANA_ADMIN_PASSWORD:-}" ]] && \
-        echo "| Grafana | https://grafana.${domain} | admin | \`${GRAFANA_ADMIN_PASSWORD}\` |" >> "$cred_file"
+## Cloud Foundry (Phase 6+)
 
-    # Phase 4: Services
-    [[ -n "${AK_ADMIN_PASSWORD:-}" ]] && \
-        echo "| artifact-keeper | https://artifactory.${domain} | admin | \`${AK_ADMIN_PASSWORD}\` |" >> "$cred_file"
+| Service | URL | Username | Details |
+|---------|-----|----------|---------|
+| CF API | https://api.${apps_domain} | cf-admin | Token via \`cf auth cf-admin\` |
+| kappman | https://kappman.${apps_domain} | admin | Default: \`change_me\` |
 
-    # Phase 5: GitLab
-    [[ -n "${GITLAB_ROOT_PASSWORD:-}" ]] && \
-        echo "| GitLab | https://gitlab.${domain} | root | \`${GITLAB_ROOT_PASSWORD}\` |" >> "$cred_file"
+## Useful Commands
+
+\`\`\`bash
+# Stack management
+./k8/stack.sh start|stop|status|deletestack
+
+# Kubernetes access
+export KUBECONFIG=~/.kube/config-\${LIMA_VM_NAME}
+kubectl get pods -A
+
+# Cloud Foundry
+cf api https://api.${apps_domain} --skip-ssl-validation
+cf auth cf-admin
+
+# OpenBao
+kubectl exec -n openbao openbao-0 -- bao login <root-token>
+kubectl exec -n openbao openbao-0 -- bao kv list secret/
+\`\`\`
+CRED_EOF
 
     chmod 600 "$cred_file"
     log_info "Credentials written to ${cred_file}"
@@ -728,6 +751,18 @@ kubectl exec -n openbao openbao-0 -- bao login <root-token>
 BAOEOF
       chmod 600 "$openbao_cred_file"
       log_success "OpenBao credentials written to ${openbao_cred_file}"
+
+      # Also generate unseal.sh for stack.sh auto-unseal compatibility
+      local unseal_sh="${K8_DIR}/unseal.sh"
+      cat > "$unseal_sh" <<UNSEALEOF
+#!/usr/bin/env bash
+# Auto-generated by install.sh — used by stack.sh for auto-unseal
+kubectl exec -n openbao openbao-0 -- bao operator unseal ${OPENBAO_UNSEAL_KEY_1}
+kubectl exec -n openbao openbao-0 -- bao operator unseal ${OPENBAO_UNSEAL_KEY_2}
+kubectl exec -n openbao openbao-0 -- bao operator unseal ${OPENBAO_UNSEAL_KEY_3}
+UNSEALEOF
+      chmod 700 "$unseal_sh"
+
       echo ""
       printf "  ${BOLD}${YELLOW}IMPORTANT: Save openbao_credentials.md in your password manager!${NC}\n"
       echo ""

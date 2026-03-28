@@ -29,7 +29,7 @@ func (s *S3) Provision(ctx context.Context, client *k8sclient.Client, name, name
 	resName := "s3-" + name
 
 	// 1. Create API key
-	keyResp, err := s.garageRequest(ctx, http.MethodPost, "/v1/key", map[string]interface{}{
+	keyResp, err := s.garageRequest(ctx, http.MethodPost, "/v2/CreateKey", map[string]interface{}{
 		"name": resName,
 	})
 	if err != nil {
@@ -39,7 +39,7 @@ func (s *S3) Provision(ctx context.Context, client *k8sclient.Client, name, name
 	secretAccessKey, _ := keyResp["secretAccessKey"].(string)
 
 	// 2. Create bucket
-	bucketResp, err := s.garageRequest(ctx, http.MethodPost, "/v1/bucket", map[string]interface{}{
+	bucketResp, err := s.garageRequest(ctx, http.MethodPost, "/v2/CreateBucket", map[string]interface{}{
 		"globalAlias": resName,
 	})
 	if err != nil {
@@ -48,7 +48,7 @@ func (s *S3) Provision(ctx context.Context, client *k8sclient.Client, name, name
 	bucketID, _ := bucketResp["id"].(string)
 
 	// 3. Grant key access to bucket
-	_, err = s.garageRequest(ctx, http.MethodPost, "/v1/bucket/allow", map[string]interface{}{
+	_, err = s.garageRequest(ctx, http.MethodPost, "/v2/AllowBucketKey", map[string]interface{}{
 		"bucketId":    bucketID,
 		"accessKeyId": accessKeyID,
 		"permissions": map[string]interface{}{
@@ -109,10 +109,10 @@ func (s *S3) Deprovision(ctx context.Context, client *k8sclient.Client, name, na
 	_ = s.emptyBucket(ctx, bucket, accessKeyID, secretAccessKey)
 
 	// 3. Delete bucket via Admin API
-	_, _ = s.garageDelete(ctx, "/v1/bucket?id="+bucketID)
+	_, _ = s.garageDelete(ctx, "/v2/DeleteBucket?id="+bucketID)
 
 	// 4. Delete API key via Admin API
-	_, _ = s.garageDelete(ctx, "/v1/key?id="+accessKeyID)
+	_, _ = s.garageDelete(ctx, "/v2/DeleteKey?id="+accessKeyID)
 
 	// 5. Delete K8s Secret
 	_ = client.Typed.CoreV1().Secrets(namespace).Delete(ctx, secretName, metav1.DeleteOptions{})
