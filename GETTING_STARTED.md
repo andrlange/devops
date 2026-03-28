@@ -151,6 +151,20 @@ Replace `<domain>` with the domain you configured during installation.
 
 ## 6. Troubleshooting
 
+### Pod startup warnings during installation
+
+During installation, you will see warnings like:
+
+```
+[WARN] Not all pods Ready yet in 'garage' — retrying in 30s...
+```
+
+**This is normal.** Container images need to be pulled from the registry, which can take 30 seconds to several minutes depending on image size and network speed. The installer automatically retries after 30 seconds and will continue even if some pods are still starting.
+
+Large components like ArgoCD, GitLab CE, and Grafana may take 2-5 minutes to become fully ready. The installer handles this gracefully — you do not need to intervene.
+
+### Common issues
+
 | Problem | Solution |
 |---------|----------|
 | Lima VM won't start | `limactl stop <name> && limactl start <name>`. Check `limactl list` for status. |
@@ -159,6 +173,7 @@ Replace `<domain>` with the domain you configured during installation.
 | OpenBao sealed after restart | Run `./k8/stack.sh start` — auto-unseal is attempted automatically. If manual unseal is needed, see `credentials.md` for unseal keys. |
 | No LoadBalancer IP assigned | MetalLB L2 requires vzNAT networking. Verify the Lima VM type: `limactl info | jq '.vmType'` should return `"vz"`. |
 | `kubectl` connection refused | Wrong kubeconfig context. Run `./k8/stack.sh context` to verify, or `./k8/stack.sh start` to re-export the kubeconfig. |
+| Installation interrupted | Re-run `./install.sh phase <N>` to resume from where it stopped. Completed components are tracked and skipped automatically. |
 
 ---
 
