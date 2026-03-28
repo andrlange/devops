@@ -1557,11 +1557,11 @@ install_phase_5() {
   if ! component_is_installed "phase5_runner" "$STATE_FILE"; then
     log_step "Registering GitLab Runner..."
 
-    # Wait for GitLab API to be available
+    # Wait for GitLab API to be available (check internally, not via Traefik)
     log_info "Waiting for GitLab API..."
     local api_ready=false
     for i in $(seq 1 20); do
-      local code=$(curl -sk -o /dev/null -w "%{http_code}" "https://gitlab.${GITLAB_DOMAIN}/-/readiness" 2>/dev/null)
+      local code=$(kubectl exec -n gitlab gitlab-0 -- curl -s -o /dev/null -w "%{http_code}" "http://localhost/-/readiness" 2>/dev/null)
       if [[ "$code" == "200" ]]; then
         api_ready=true
         break
