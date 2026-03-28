@@ -543,14 +543,22 @@ REGEOF
       log_info "Root Token: ${OPENBAO_ROOT_TOKEN}"
     fi
 
-    # Unseal (need 3 of 5 keys)
-    log_info "Unsealing OpenBao..."
-    for key_var in OPENBAO_UNSEAL_KEY_1 OPENBAO_UNSEAL_KEY_2 OPENBAO_UNSEAL_KEY_3; do
-      local key="${!key_var}"
-      if [[ -n "$key" ]]; then
-        kubectl exec -n openbao openbao-0 -- bao operator unseal "$key" >/dev/null 2>&1
-      fi
-    done
+    # Unseal (need 3 of 5 keys) — skip if keys not available (already initialized in prior run)
+    local sealed_check
+    sealed_check=$(kubectl exec -n openbao openbao-0 -- bao status -format=json 2>/dev/null \
+      | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['sealed'])" 2>/dev/null || echo "true")
+
+    if [[ "$sealed_check" == "true" ]]; then
+      log_info "Unsealing OpenBao..."
+      for key_var in OPENBAO_UNSEAL_KEY_1 OPENBAO_UNSEAL_KEY_2 OPENBAO_UNSEAL_KEY_3; do
+        local key="${!key_var:-}"
+        if [[ -n "$key" ]]; then
+          kubectl exec -n openbao openbao-0 -- bao operator unseal "$key" >/dev/null 2>&1
+        fi
+      done
+    else
+      log_info "OpenBao is already unsealed"
+    fi
 
     # Verify unsealed
     local sealed
