@@ -628,7 +628,48 @@ REGEOF
       OPENBAO_ROOT_TOKEN=$(echo "$init_output" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['root_token'])")
 
       log_success "OpenBao initialized"
-      log_info "Root Token: ${OPENBAO_ROOT_TOKEN}"
+
+      # Write OpenBao credentials to separate file (critical — must be saved!)
+      local openbao_cred_file="${K8_DIR}/../openbao_credentials.md"
+      cat > "$openbao_cred_file" <<BAOEOF
+# OpenBao Credentials
+
+> CRITICAL: Store these credentials in a secure location (password manager).
+> These are the ONLY way to unseal OpenBao after a restart.
+> If lost, all secrets in OpenBao are irrecoverable.
+
+Generated: $(date '+%Y-%m-%d %H:%M')
+VM Name: ${LIMA_VM_NAME}
+
+## Root Token
+
+\`${OPENBAO_ROOT_TOKEN}\`
+
+## Unseal Keys (3 of 5 required to unseal)
+
+| Key | Value |
+|-----|-------|
+| Key 1 | \`${OPENBAO_UNSEAL_KEY_1}\` |
+| Key 2 | \`${OPENBAO_UNSEAL_KEY_2}\` |
+| Key 3 | \`${OPENBAO_UNSEAL_KEY_3}\` |
+| Key 4 | \`${OPENBAO_UNSEAL_KEY_4}\` |
+| Key 5 | \`${OPENBAO_UNSEAL_KEY_5}\` |
+
+## Usage
+
+\`\`\`bash
+# Unseal after restart (run 3 times with different keys)
+kubectl exec -n openbao openbao-0 -- bao operator unseal <key>
+
+# Login with root token
+kubectl exec -n openbao openbao-0 -- bao login <root-token>
+\`\`\`
+BAOEOF
+      chmod 600 "$openbao_cred_file"
+      log_success "OpenBao credentials written to ${openbao_cred_file}"
+      echo ""
+      printf "  ${BOLD}${YELLOW}IMPORTANT: Save openbao_credentials.md in your password manager!${NC}\n"
+      echo ""
     fi
 
     # Unseal (need 3 of 5 keys) — skip if keys not available (already initialized in prior run)
