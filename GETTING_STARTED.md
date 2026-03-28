@@ -50,7 +50,7 @@ After Phase 1 deploys MetalLB, add these A-records to your DNS zone:
 | `*.development.<your-domain>` | `192.168.64.200` |
 | `*.app.<your-domain>` | `192.168.64.203` |
 
-These IPs are local to your Mac (vzNAT network) and remain stable across reboots.
+These IPs are fixed — macOS Virtualization.framework (vzNAT) always assigns the `192.168.64.0/24` subnet. MetalLB allocates from `192.168.64.200-210`. These IPs are local to your Mac and identical on every Apple Silicon Mac.
 
 ### Google Cloud DNS
 
