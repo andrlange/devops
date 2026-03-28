@@ -1667,20 +1667,50 @@ install_phase_6() {
     mark_component_installed "phase6_gateway_api" "$STATE_FILE"
   fi
 
-  # --- Install Contour ---
+  # --- Install Contour (official projectcontour chart) ---
   if ! component_is_installed "phase6_contour" "$STATE_FILE"; then
     log_step "Installing Contour (Gateway API controller)..."
     ensure_namespace "projectcontour"
-    # Note: Images need to be imported first
-    helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
-    helm install contour bitnami/contour \
-      -n projectcontour \
-      --set contour.gatewayAPIEnabled=true \
-      --set envoy.service.type=LoadBalancer \
-      --set envoy.service.annotations."metallb\.universe\.tf/loadBalancerIPs"="$(get_metallb_apps_ip)" \
-      2>&1 | tail -3
-    wait_for_pods "projectcontour" 120
-    log_success "Contour installed"
+
+    local CONTOUR_REGISTRY="${REGISTRY:-artifactory.cfapps.cool}/${REGISTRY_REPO:-docker-local}"
+    local APPS_LB_IP="$(get_metallb_apps_ip)"
+
+    # Install Contour via official manifests + patch for local images and MetalLB
+    kubectl apply -f https://projectcontour.io/quickstart/contour-gateway-provisioner.yaml 2>&1 | tail -5
+
+    # Create Gateway with MetalLB IP annotation for apps domain
+    kubectl apply -f - <<GWEOF
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: contour
+  namespace: projectcontour
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: "${APPS_LB_IP}"
+spec:
+  gatewayClassName: contour
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https
+      protocol: HTTPS
+      port: 443
+      allowedRoutes:
+        namespaces:
+          from: All
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-apps-tls
+            namespace: traefik
+GWEOF
+
+    wait_for_pods "projectcontour" 180
+    log_success "Contour installed on ${APPS_LB_IP}"
     mark_component_installed "phase6_contour" "$STATE_FILE"
   fi
 
