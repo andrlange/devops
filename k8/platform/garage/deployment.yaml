@@ -52,20 +52,25 @@ spec:
               mountPath: /var/lib/garage/data
             - name: garage-meta
               mountPath: /var/lib/garage/meta
+          # Note: Probes use v2 health endpoint. Garage returns 503 until
+          # node layout is configured, so install.sh removes probes temporarily
+          # during initial setup and re-adds them after layout configuration.
           livenessProbe:
             httpGet:
-              path: /health
+              path: /v2/GetClusterHealth
               port: admin
-            initialDelaySeconds: 15
+            initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 5
+            failureThreshold: 5
           readinessProbe:
             httpGet:
-              path: /health
+              path: /v2/GetClusterHealth
               port: admin
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
+            failureThreshold: 5
       volumes:
         - name: garage-config
           configMap:

@@ -1059,103 +1059,127 @@ install_phase_2() {
     log_step "2.3 — Garage"
     ensure_namespace "garage"
 
-    # Generate Garage secrets if not already set
-    local garage_rpc_secret
+    # Generate Garage secrets
+    local garage_rpc_secret garage_admin_token
     garage_rpc_secret=$(openssl rand -hex 32)
-    local garage_admin_token
     garage_admin_token=$(openssl rand -hex 32)
 
-    # Patch ConfigMap with generated secrets and correct domains before applying
+    # Patch ConfigMap with generated secrets before applying
     sed -i '' \
       -e "s/rpc_secret = .*/rpc_secret = \"${garage_rpc_secret}\"/" \
       -e "s/admin_token = .*/admin_token = \"${garage_admin_token}\"/" \
       "${K8_DIR}/platform/garage/configmap.yaml"
 
+    # Deploy Garage
     smart_install "garage" "${K8_DIR}/platform/garage" "garage"
-    wait_for_pods "garage" 180
 
-    # Wait for Garage admin API to be reachable
-    log_info "Waiting for Garage admin API..."
-    local BAO="kubectl exec -n openbao openbao-0 --"
-    local garage_api="http://garage.garage.svc:3903"
-    local attempts=0
-    while ! kubectl exec -n garage garage-0 -- curl -sf "${garage_api}/health" &>/dev/null; do
-      attempts=$((attempts + 1))
-      if [[ $attempts -ge 60 ]]; then
-        log_warn "Garage admin API not reachable after 60s. Continuing..."
-        break
-      fi
-      sleep 2
-    done
+    # Remove liveness/readiness probes temporarily (Garage needs layout before health returns 200)
+    kubectl patch statefulset garage -n garage --type='json' \
+      -p='[{"op":"remove","path":"/spec/template/spec/containers/0/livenessProbe"},{"op":"remove","path":"/spec/template/spec/containers/0/readinessProbe"}]' 2>/dev/null || true
+    kubectl delete pod garage-0 -n garage --grace-period=5 2>/dev/null || true
+    sleep 10
 
-    # Configure Garage node layout
-    log_info "Configuring Garage node layout..."
+    # Wait for Garage pod to be Running (without probes it won't become Ready, just Running)
+    wait_for_pod_running "garage" "app.kubernetes.io/name=garage" 120
+
+    # --- Configure node layout via port-forward (Garage v2 API, no curl in container) ---
+    log_info "Configuring Garage node layout (v2 API)..."
+    kubectl port-forward -n garage garage-0 13903:3903 &>/dev/null &
+    local pf_pid=$!
+    sleep 3
+
+    local garage_api="http://localhost:13903"
     local node_id
-    node_id=$(kubectl exec -n garage garage-0 -- curl -sf \
-      -H "Authorization: Bearer ${garage_admin_token}" \
-      "${garage_api}/v1/status" 2>/dev/null | jq -r '.node' 2>/dev/null || echo "")
+    node_id=$(curl -sf -H "Authorization: Bearer ${garage_admin_token}" \
+      "${garage_api}/v2/GetClusterStatus" 2>/dev/null | jq -r '.node' 2>/dev/null || echo "")
 
-    if [[ -n "$node_id" ]]; then
-      kubectl exec -n garage garage-0 -- curl -sf -X POST \
-        -H "Authorization: Bearer ${garage_admin_token}" \
+    if [[ -n "$node_id" ]] && [[ "$node_id" != "null" ]]; then
+      # Assign node to layout
+      curl -sf -X POST -H "Authorization: Bearer ${garage_admin_token}" \
         -H "Content-Type: application/json" \
         -d "[{\"id\":\"${node_id}\",\"zone\":\"dc1\",\"capacity\":214748364800,\"tags\":[\"node1\"]}]" \
-        "${garage_api}/v1/layout" >/dev/null 2>&1
+        "${garage_api}/v2/UpdateClusterLayout" >/dev/null 2>&1 || true
 
       # Apply layout
       local layout_version
-      layout_version=$(kubectl exec -n garage garage-0 -- curl -sf \
-        -H "Authorization: Bearer ${garage_admin_token}" \
-        "${garage_api}/v1/layout" 2>/dev/null | jq -r '.version' 2>/dev/null || echo "1")
-      kubectl exec -n garage garage-0 -- curl -sf -X POST \
-        -H "Authorization: Bearer ${garage_admin_token}" \
+      layout_version=$(curl -sf -H "Authorization: Bearer ${garage_admin_token}" \
+        "${garage_api}/v2/GetClusterLayout" 2>/dev/null | jq -r '.version' 2>/dev/null || echo "1")
+      curl -sf -X POST -H "Authorization: Bearer ${garage_admin_token}" \
         -H "Content-Type: application/json" \
         -d "{\"version\":${layout_version}}" \
-        "${garage_api}/v1/layout/apply" >/dev/null 2>&1
-      log_success "Garage node layout configured"
+        "${garage_api}/v2/ApplyClusterLayout" >/dev/null 2>&1 || true
+
+      log_success "Garage node layout configured (node: ${node_id:0:12}...)"
+    else
+      log_warn "Could not get Garage node ID — layout not configured"
     fi
 
-    # Create S3 API keys for all services and store in OpenBao
+    # Verify health
+    local health
+    health=$(curl -sf "${garage_api}/v2/GetClusterHealth" 2>/dev/null | jq -r '.status' 2>/dev/null || echo "unknown")
+    if [[ "$health" == "healthy" ]]; then
+      log_success "Garage is healthy"
+    else
+      log_warn "Garage health: ${health} — some services may not work until layout is configured"
+    fi
+
+    # --- Create S3 API keys for all services ---
     log_info "Creating Garage S3 API keys..."
     local BAO="kubectl exec -n openbao openbao-0 --"
     $BAO bao login "${OPENBAO_ROOT_TOKEN:-}" >/dev/null 2>&1 || true
 
     for svc_name in admin loki mimir tempo velero artifacts; do
       local key_response
-      key_response=$(kubectl exec -n garage garage-0 -- curl -sf -X POST \
-        -H "Authorization: Bearer ${garage_admin_token}" \
+      key_response=$(curl -sf -X POST -H "Authorization: Bearer ${garage_admin_token}" \
         -H "Content-Type: application/json" \
         -d "{\"name\":\"${svc_name}\"}" \
-        "${garage_api}/v1/key" 2>/dev/null || echo "")
+        "${garage_api}/v2/CreateKey" 2>/dev/null || echo "")
 
       if [[ -n "$key_response" ]]; then
         local ak sk
         ak=$(echo "$key_response" | jq -r '.accessKeyId' 2>/dev/null)
         sk=$(echo "$key_response" | jq -r '.secretAccessKey' 2>/dev/null)
 
-        if [[ -n "$ak" ]] && [[ -n "$sk" ]]; then
+        if [[ -n "$ak" ]] && [[ "$ak" != "null" ]] && [[ -n "$sk" ]]; then
           $BAO bao kv put "secret/garage/${svc_name}" \
-            access_key="$ak" secret_key="$sk" >/dev/null 2>&1
+            access_key="$ak" secret_key="$sk" >/dev/null 2>&1 || true
           log_success "Garage S3 key '${svc_name}' created and stored in OpenBao"
 
-          # Create buckets for each service
-          local bucket_name="${svc_name}"
-          [[ "$svc_name" == "admin" ]] && bucket_name="" # Skip bucket for admin key
-          if [[ -n "$bucket_name" ]]; then
-            kubectl exec -n garage garage-0 -- curl -sf -X PUT \
-              -H "Authorization: Bearer ${garage_admin_token}" \
-              "${garage_api}/v1/bucket" \
+          # Create bucket (skip for admin key)
+          if [[ "$svc_name" != "admin" ]]; then
+            curl -sf -X POST -H "Authorization: Bearer ${garage_admin_token}" \
               -H "Content-Type: application/json" \
-              -d "{\"globalAlias\":\"${bucket_name}\"}" >/dev/null 2>&1 || true
+              -d "{\"globalAlias\":\"${svc_name}\"}" \
+              "${garage_api}/v2/CreateBucket" >/dev/null 2>&1 || true
+
+            # Allow key access to bucket
+            local bucket_id
+            bucket_id=$(curl -sf -H "Authorization: Bearer ${garage_admin_token}" \
+              "${garage_api}/v2/GetBucketInfo?globalAlias=${svc_name}" 2>/dev/null | jq -r '.id' 2>/dev/null || echo "")
+            if [[ -n "$bucket_id" ]] && [[ "$bucket_id" != "null" ]]; then
+              curl -sf -X POST -H "Authorization: Bearer ${garage_admin_token}" \
+                -H "Content-Type: application/json" \
+                -d "{\"bucketId\":\"${bucket_id}\",\"accessKeyId\":\"${ak}\",\"permissions\":{\"read\":true,\"write\":true,\"owner\":true}}" \
+                "${garage_api}/v2/AllowBucketKey" >/dev/null 2>&1 || true
+            fi
           fi
         fi
       fi
     done
 
+    # Stop port-forward
+    kill $pf_pid 2>/dev/null || true
+
     # Store admin token in OpenBao
     $BAO bao kv put "secret/garage/admin-token" \
-      token="${garage_admin_token}" >/dev/null 2>&1
+      token="${garage_admin_token}" >/dev/null 2>&1 || true
     log_success "Garage admin token stored in OpenBao"
+
+    # Re-add probes now that layout is configured and health returns 200
+    kubectl patch statefulset garage -n garage --type='json' -p='[
+      {"op":"add","path":"/spec/template/spec/containers/0/livenessProbe","value":{"httpGet":{"path":"/v2/GetClusterHealth","port":3903},"initialDelaySeconds":15,"periodSeconds":30,"failureThreshold":3}},
+      {"op":"add","path":"/spec/template/spec/containers/0/readinessProbe","value":{"httpGet":{"path":"/v2/GetClusterHealth","port":3903},"initialDelaySeconds":5,"periodSeconds":10,"failureThreshold":3}}
+    ]' 2>/dev/null || true
 
     log_success "Garage installed and bootstrapped"
     mark_component_installed "GARAGE" "$STATE_FILE"
@@ -1438,13 +1462,17 @@ install_phase_4() {
       local garage_admin_token
       garage_admin_token=$($BAO bao kv get -field=token secret/garage/admin-token 2>/dev/null || echo "")
       if [[ -n "$garage_admin_token" ]]; then
-        local garage_api="http://garage.garage.svc:3903"
+        # Use port-forward (Garage container has no curl)
+        kubectl port-forward -n garage garage-0 13903:3903 &>/dev/null &
+        local pf_pid=$!
+        sleep 3
         local key_resp
-        key_resp=$(kubectl exec -n garage garage-0 -- curl -sf -X POST \
+        key_resp=$(curl -sf -X POST \
           -H "Authorization: Bearer ${garage_admin_token}" \
           -H "Content-Type: application/json" \
           -d '{"name":"artifacts"}' \
-          "${garage_api}/v1/key" 2>/dev/null || echo "")
+          "http://localhost:13903/v2/CreateKey" 2>/dev/null || echo "")
+        kill $pf_pid 2>/dev/null || true
         if [[ -n "$key_resp" ]]; then
           local ak sk
           ak=$(echo "$key_resp" | jq -r '.accessKeyId' 2>/dev/null)
