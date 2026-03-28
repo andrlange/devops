@@ -104,19 +104,20 @@ Save the `AccessKeyId` and `SecretAccessKey` — you will need them when `instal
 
 ## 4. Installation Phases
 
-The wizard deploys the stack in phases. Phases 1–5 are required. Phases 6–7 are optional.
+The wizard deploys the stack in 8 phases. All phases run automatically when using `./install.sh` without arguments.
 
-| Phase | Components | Required |
-|-------|-----------|----------|
-| 1 | Foundation: Lima VM, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager | Yes |
-| 2 | Platform: ArgoCD, Portainer, Garage S3, Technitium DNS, Velero | Yes |
-| 3 | Monitoring: Grafana, Loki, Mimir, Tempo, Alloy, kube-state-metrics | Yes |
-| 4 | Services: artifact-keeper, PostgreSQL, Meilisearch, Trivy | Yes |
-| 5 | GitLab CE + Runner | Yes |
-| 6 | Cloud Foundry (Korifi) | Optional |
-| 7 | Service Brokers (PostgreSQL, Valkey, RabbitMQ, S3) | Optional (requires Go) |
+| Phase | Components | Description |
+|-------|-----------|-------------|
+| 1 | Foundation | Lima VM, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager |
+| 2 | Platform | ArgoCD, Portainer, Garage S3, Technitium DNS, Velero |
+| 3 | Monitoring | Grafana, Loki, Mimir, Tempo, Alloy, kube-state-metrics, node-exporter |
+| 4 | Services | artifact-keeper (Container Registry), PostgreSQL, Meilisearch, Trivy |
+| 5 | GitLab CE | GitLab CE + GitLab Runner (CI/CD) |
+| 6 | Cloud Foundry | Korifi (CF on K8s), kpack, Contour Gateway, Buildpacks |
+| 7 | Service Brokers | OSBAPI Broker: PostgreSQL, Valkey, RabbitMQ, S3 (requires Go) |
+| 8 | kappman | Korifi Apps Manager UI (Spring Boot, deployed via `cf push`) |
 
-Each phase must complete successfully before the next begins. The wizard will pause and wait for confirmation between phases.
+Each phase tracks completion state and can be resumed individually with `./install.sh phase <N>`. A timing summary is displayed after each phase.
 
 ---
 

@@ -39,6 +39,9 @@ tar czf "${DIST_DIR}/stack.tgz" \
   --exclude='source' \
   --exclude='artifactory' \
   --exclude='otel' \
+  --exclude='.gradle' \
+  --exclude='build' \
+  --exclude='node_modules' \
   -C "${SCRIPT_DIR}" \
   k8/ \
   "${TAR_EXTRAS[@]}"

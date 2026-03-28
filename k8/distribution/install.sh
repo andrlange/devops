@@ -2615,6 +2615,11 @@ for ns in sorted(namespaces):
   # --- Push kappman to Korifi ---
   if ! component_is_installed "phase8_push" "$STATE_FILE"; then
     log_step "Pushing kappman to Korifi..."
+
+    # Patch manifest.yml and deploy-cf.sh with configured apps domain
+    sed -i '' "s/app\.cfapps\.cool/${CF_DOMAIN}/g" "${KAPPMAN_DIR}/manifest.yml"
+    sed -i '' "s/app\.cfapps\.cool/${CF_DOMAIN}/g" "${KAPPMAN_DIR}/deploy-cf.sh"
+
     pushd "$KAPPMAN_DIR" > /dev/null
     cf push 2>&1 | tail -5
     popd > /dev/null
@@ -2635,7 +2640,7 @@ for ns in sorted(namespaces):
   log_step "Verifying kappman deployment..."
   sleep 10
   local health_status
-  health_status=$(curl -sk "https://kappman.${CF_DOMAIN}/actuator/health" 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('status','UNKNOWN'))" 2>/dev/null || echo "UNREACHABLE")
+  health_status=$(curl -sk "https://kappman.${CF_DOMAIN}/actuator/health" 2>/dev/null | jq -r '.status // "UNKNOWN"' 2>/dev/null || echo "UNREACHABLE")
 
   if [[ "$health_status" == "UP" ]]; then
     log_success "kappman is healthy"
@@ -2849,14 +2854,21 @@ continue_from_phase() {
     fi
 
     echo ""
-    log_info "Phase 7 deploys: OSBAPI Service Brokers (PostgreSQL, Valkey, RabbitMQ, S3) [OPTIONAL, requires Go]"
-    if ask_yes_no "Continue with Phase 7 (Service Brokers)?" "n"; then
+    log_info "Phase 7 deploys: OSBAPI Service Brokers (PostgreSQL, Valkey, RabbitMQ, S3)"
+    if ask_yes_no "Continue with Phase 7 (Service Brokers)?" "y"; then
       install_phase_7
+    fi
+
+    echo ""
+    log_info "Phase 8 deploys: kappman (Korifi Apps Manager UI)"
+    if ask_yes_no "Continue with Phase 8 (kappman)?" "y"; then
+      install_phase_8
     fi
   fi
 
   echo ""
   log_success "Installation complete!"
+  print_phase_timing
   cmd_status
 }
 
@@ -2875,7 +2887,7 @@ cmd_full_setup() {
   fi
 
   echo ""
-  log_info "Starting full installation (Phase 1-7)..."
+  log_info "Starting full installation (Phase 1-8)..."
   echo ""
 
   install_phase_1
@@ -2885,6 +2897,7 @@ cmd_full_setup() {
   install_phase_5
   install_phase_6
   install_phase_7
+  install_phase_8
 
   echo ""
   log_success "Installation complete!"
@@ -2959,8 +2972,9 @@ main() {
         5) install_phase_5 ;;
         6) install_phase_6 ;;
         7) install_phase_7 ;;
+        8) install_phase_8 ;;
         *)
-          log_error "Unknown phase: $phase_num (valid: 1-7)"
+          log_error "Unknown phase: $phase_num (valid: 1-8)"
           exit 1
           ;;
       esac
