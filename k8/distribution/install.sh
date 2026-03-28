@@ -1735,7 +1735,8 @@ GWEOF
   # --- Install kpack ---
   if ! component_is_installed "phase6_kpack" "$STATE_FILE"; then
     log_step "Installing kpack v0.17.0..."
-    kubectl apply -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.0/release-0.17.0.yaml 2>&1 | tail -3
+    kubectl apply --server-side --force-conflicts \
+      -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.0/release-0.17.0.yaml 2>&1 | tail -5
     wait_for_pods "kpack" 120
     log_success "kpack installed"
     mark_component_installed "phase6_kpack" "$STATE_FILE"
