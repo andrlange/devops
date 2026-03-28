@@ -245,13 +245,22 @@ cmd_zero() {
 
   local cfg_base_domain
   while true; do
-    cfg_base_domain=$(ask "Base domain" "${BASE_DOMAIN:-development.cfapps.cool}")
+    cfg_base_domain=$(ask "Platform domain (*.development.<domain>)" "${PLATFORM_DOMAIN:-development.cfapps.cool}")
     if validate_domain "$cfg_base_domain"; then break; fi
   done
 
+  # Derive base TLD from platform domain (e.g., "development.yotta-cloud.net" → "yotta-cloud.net")
+  local derived_tld="${cfg_base_domain#*.}"
+  if [[ -z "$derived_tld" ]] || [[ "$derived_tld" == "$cfg_base_domain" ]]; then
+    derived_tld="$cfg_base_domain"
+  fi
+
+  local cfg_apps_domain
+  cfg_apps_domain=$(ask "Apps domain" "${APPS_DOMAIN:-app.${derived_tld}}")
+
   local cfg_acme_email
   while true; do
-    cfg_acme_email=$(ask "ACME email (for Let's Encrypt)" "${ACME_EMAIL:-admin@cfapps.cool}")
+    cfg_acme_email=$(ask "ACME email (for Let's Encrypt)" "${ACME_EMAIL:-admin@${derived_tld}}")
     if validate_email "$cfg_acme_email"; then break; fi
   done
 
@@ -338,7 +347,8 @@ cmd_zero() {
     "Lima Disk=${cfg_lima_disk}GB"
     "Network=192.168.64.0/24 (vzNAT, fixed)"
     "MetalLB IP Range=192.168.64.200-210 (fixed)"
-    "Base Domain=${cfg_base_domain}"
+    "Platform Domain=${cfg_base_domain}"
+    "Apps Domain=${cfg_apps_domain}"
     "ACME Email=${cfg_acme_email}"
     "Registry=${cfg_registry}"
     "Registry Repo=${cfg_registry_repo}"
@@ -384,6 +394,8 @@ METALLB_IP_RANGE="${cfg_metallb_range}"
 
 # --- Domain ------------------------------------------------------------------
 BASE_DOMAIN="${cfg_base_domain}"
+PLATFORM_DOMAIN="${cfg_base_domain}"
+APPS_DOMAIN="${cfg_apps_domain}"
 ACME_EMAIL="${cfg_acme_email}"
 
 # --- Registry ----------------------------------------------------------------
@@ -2743,12 +2755,28 @@ cmd_full_setup() {
   fi
 
   echo ""
-  log_info "Phase 1 deploys: Lima VM, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager"
-  if ask_yes_no "Begin Phase 1 (Foundation) installation?" "y"; then
-    install_phase_1
+  log_info "Starting full installation (Phase 1-7)..."
+  log_info "Phases 1-5 are required, Phases 6-7 are optional."
+  echo ""
+
+  install_phase_1
+  install_phase_2
+  install_phase_3
+  install_phase_4
+  install_phase_5
+
+  echo ""
+  if ask_yes_no "Install Phase 6 (Cloud Foundry / Korifi)? [optional]" "n"; then
+    install_phase_6
   fi
 
-  continue_from_phase 1
+  if ask_yes_no "Install Phase 7 (Service Brokers)? [optional, requires Go]" "n"; then
+    install_phase_7
+  fi
+
+  echo ""
+  log_success "Installation complete!"
+  cmd_status
 }
 
 # =============================================================================
