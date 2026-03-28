@@ -2400,6 +2400,63 @@ cmd_validate() {
 }
 
 # =============================================================================
+# Continue from a given phase — offer next phases interactively
+# =============================================================================
+continue_from_phase() {
+  local completed_phase="$1"
+
+  if [[ "$completed_phase" -lt 2 ]] && phase_is_complete 1 "$STATE_FILE"; then
+    echo ""
+    log_info "Phase 2 deploys: ArgoCD, Portainer, Garage S3, Technitium DNS, Velero"
+    if ask_yes_no "Continue with Phase 2 (Platform)?" "y"; then
+      install_phase_2
+    else return 0; fi
+  fi
+
+  if [[ "$completed_phase" -lt 3 ]] && phase_is_complete 2 "$STATE_FILE"; then
+    echo ""
+    log_info "Phase 3 deploys: Grafana, Loki, Mimir, Tempo, Alloy, kube-state-metrics, node-exporter"
+    if ask_yes_no "Continue with Phase 3 (Monitoring)?" "y"; then
+      install_phase_3
+    else return 0; fi
+  fi
+
+  if [[ "$completed_phase" -lt 4 ]] && phase_is_complete 3 "$STATE_FILE"; then
+    echo ""
+    log_info "Phase 4 deploys: artifact-keeper (Backend + Web UI), PostgreSQL, Meilisearch, Trivy"
+    if ask_yes_no "Continue with Phase 4 (Services)?" "y"; then
+      install_phase_4
+    else return 0; fi
+  fi
+
+  if [[ "$completed_phase" -lt 5 ]] && phase_is_complete 4 "$STATE_FILE"; then
+    echo ""
+    log_info "Phase 5 deploys: GitLab CE + GitLab Runner (CI/CD)"
+    if ask_yes_no "Continue with Phase 5 (GitLab CE)?" "y"; then
+      install_phase_5
+    else return 0; fi
+  fi
+
+  if phase_is_complete 5 "$STATE_FILE"; then
+    echo ""
+    log_info "Phase 6 deploys: Korifi (Cloud Foundry on K8s) + kpack + Contour [OPTIONAL]"
+    if ask_yes_no "Continue with Phase 6 (Cloud Foundry)?" "n"; then
+      install_phase_6
+    fi
+
+    echo ""
+    log_info "Phase 7 deploys: OSBAPI Service Brokers (PostgreSQL, Valkey, RabbitMQ, S3) [OPTIONAL, requires Go]"
+    if ask_yes_no "Continue with Phase 7 (Service Brokers)?" "n"; then
+      install_phase_7
+    fi
+  fi
+
+  echo ""
+  log_success "Installation complete!"
+  cmd_status
+}
+
+# =============================================================================
 # Interactive full setup — Run zero + all phases
 # =============================================================================
 cmd_full_setup() {
@@ -2414,48 +2471,12 @@ cmd_full_setup() {
   fi
 
   echo ""
+  log_info "Phase 1 deploys: Lima VM, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager"
   if ask_yes_no "Begin Phase 1 (Foundation) installation?" "y"; then
     install_phase_1
   fi
 
-  if phase_is_complete 1 "$STATE_FILE"; then
-    if ask_yes_no "Continue with Phase 2 (Platform)?" "y"; then
-      install_phase_2
-    fi
-  fi
-
-  if phase_is_complete 2 "$STATE_FILE"; then
-    if ask_yes_no "Continue with Phase 3 (Monitoring)?" "y"; then
-      install_phase_3
-    fi
-  fi
-
-  if phase_is_complete 3 "$STATE_FILE"; then
-    if ask_yes_no "Continue with Phase 4 (Services)?" "y"; then
-      install_phase_4
-    fi
-  fi
-
-  if phase_is_complete 4 "$STATE_FILE"; then
-    if ask_yes_no "Continue with Phase 5 (GitLab CE)?" "y"; then
-      install_phase_5
-    fi
-  fi
-
-  if phase_is_complete 5 "$STATE_FILE"; then
-    if ask_yes_no "Continue with Phase 6 (Cloud Foundry / Korifi)? [optional]" "n"; then
-      install_phase_6
-    fi
-  fi
-
-  if phase_is_complete 5 "$STATE_FILE"; then
-    if ask_yes_no "Continue with Phase 7 (Service Brokers)? [optional, requires Go]" "n"; then
-      install_phase_7
-    fi
-  fi
-
-  echo ""
-  cmd_status
+  continue_from_phase 1
 }
 
 # =============================================================================
@@ -2514,7 +2535,7 @@ main() {
     phase)
       local phase_num="${1:-}"
       if [[ -z "$phase_num" ]]; then
-        log_error "Usage: ./install.sh phase <1-6>"
+        log_error "Usage: ./install.sh phase <1-7>"
         exit 1
       fi
       case "$phase_num" in
@@ -2525,12 +2546,13 @@ main() {
         5) install_phase_5 ;;
         6) install_phase_6 ;;
         7) install_phase_7 ;;
-        8) install_phase_8 ;;
         *)
-          log_error "Unknown phase: $phase_num (valid: 1-8)"
+          log_error "Unknown phase: $phase_num (valid: 1-7)"
           exit 1
           ;;
       esac
+      # After completing a phase, offer to continue with next phases
+      continue_from_phase "$phase_num"
       ;;
     status)
       cmd_status
