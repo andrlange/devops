@@ -549,10 +549,11 @@ EOF
   printf "\n"
   printf "  ${GREEN}✓${NC} Stack unpacked to ${BOLD}${display_dir}${NC}\n"
   printf "\n"
-  printf "  Next steps:\n"
-  printf "    1. Set up DNS provider (see GETTING_STARTED.md in ${display_dir}/)\n"
-  printf "    2. Run the installer:\n"
-  printf "       cd ${display_dir}/k8/distribution && ./install.sh\n"
+  printf "  Next step:\n"
+  printf "    cd ${display_dir}/k8/distribution && ./install.sh\n"
+  printf "\n"
+  printf "  DNS configuration will be prompted during Phase 1.\n"
+  printf "  See GETTING_STARTED.md for DNS provider setup instructions.\n"
   printf "\n"
 }
 
