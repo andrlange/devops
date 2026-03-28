@@ -11,5 +11,4 @@ spec:
       services:
         - name: technitium-ui
           port: 5380
-  tls:
- {}
+  tls: {}
