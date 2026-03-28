@@ -598,9 +598,9 @@ REGEOF
     local init_status
     init_status=$(kubectl exec -n openbao openbao-0 -- bao status -format=json 2>/dev/null || echo '{"initialized":false}')
     local is_initialized
-    is_initialized=$(echo "$init_status" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('initialized', False))" 2>/dev/null || echo "False")
+    is_initialized=$(echo "$init_status" | jq -r '.initialized' 2>/dev/null || echo "false")
 
-    if [[ "$is_initialized" == "True" ]]; then
+    if [[ "$is_initialized" == "true" ]]; then
       log_info "OpenBao already initialized"
       # Need root token for bootstrap — check if we have it from config or ask
       if [[ -z "${OPENBAO_ROOT_TOKEN:-}" ]]; then
@@ -619,13 +619,23 @@ REGEOF
       init_output=$(kubectl exec -n openbao openbao-0 -- bao operator init \
         -key-shares=5 -key-threshold=3 -format=json 2>/dev/null)
 
-      # Extract unseal keys and root token
-      OPENBAO_UNSEAL_KEY_1=$(echo "$init_output" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['unseal_keys_b64'][0])")
-      OPENBAO_UNSEAL_KEY_2=$(echo "$init_output" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['unseal_keys_b64'][1])")
-      OPENBAO_UNSEAL_KEY_3=$(echo "$init_output" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['unseal_keys_b64'][2])")
-      OPENBAO_UNSEAL_KEY_4=$(echo "$init_output" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['unseal_keys_b64'][3])")
-      OPENBAO_UNSEAL_KEY_5=$(echo "$init_output" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['unseal_keys_b64'][4])")
-      OPENBAO_ROOT_TOKEN=$(echo "$init_output" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['root_token'])")
+      # Extract unseal keys and root token using jq (more reliable than python for JSON parsing)
+      if [[ -z "$init_output" ]]; then
+        log_error "OpenBao init returned empty output"
+        exit 1
+      fi
+      OPENBAO_UNSEAL_KEY_1=$(echo "$init_output" | jq -r '.unseal_keys_b64[0]')
+      OPENBAO_UNSEAL_KEY_2=$(echo "$init_output" | jq -r '.unseal_keys_b64[1]')
+      OPENBAO_UNSEAL_KEY_3=$(echo "$init_output" | jq -r '.unseal_keys_b64[2]')
+      OPENBAO_UNSEAL_KEY_4=$(echo "$init_output" | jq -r '.unseal_keys_b64[3]')
+      OPENBAO_UNSEAL_KEY_5=$(echo "$init_output" | jq -r '.unseal_keys_b64[4]')
+      OPENBAO_ROOT_TOKEN=$(echo "$init_output" | jq -r '.root_token')
+
+      if [[ -z "$OPENBAO_ROOT_TOKEN" ]] || [[ "$OPENBAO_ROOT_TOKEN" == "null" ]]; then
+        log_error "Failed to extract root token from init output"
+        log_error "Init output: $init_output"
+        exit 1
+      fi
 
       log_success "OpenBao initialized"
 
@@ -675,22 +685,21 @@ BAOEOF
     # Always attempt unseal — even if status reports unsealed (race condition after init)
     log_info "Unsealing OpenBao..."
     if [[ -n "${OPENBAO_UNSEAL_KEY_1:-}" ]]; then
-      # Keys available from init — use them
-      for key_var in OPENBAO_UNSEAL_KEY_1 OPENBAO_UNSEAL_KEY_2 OPENBAO_UNSEAL_KEY_3; do
-        local key="${!key_var:-}"
-        if [[ -n "$key" ]]; then
-          kubectl exec -n openbao openbao-0 -- bao operator unseal "$key" >/dev/null 2>&1 || true
-        fi
-      done
+      # Keys available from init — use them directly (not via variable indirection)
+      kubectl exec -n openbao openbao-0 -- bao operator unseal "${OPENBAO_UNSEAL_KEY_1}" >/dev/null 2>&1 || true
+      kubectl exec -n openbao openbao-0 -- bao operator unseal "${OPENBAO_UNSEAL_KEY_2}" >/dev/null 2>&1 || true
+      kubectl exec -n openbao openbao-0 -- bao operator unseal "${OPENBAO_UNSEAL_KEY_3}" >/dev/null 2>&1 || true
+    else
+      log_warn "No unseal keys available — OpenBao may need manual unseal"
     fi
 
     # Wait a moment for seal status to stabilize
-    sleep 2
+    sleep 3
 
     # Verify unsealed
     local sealed
     sealed=$(kubectl exec -n openbao openbao-0 -- bao status -format=json 2>/dev/null \
-      | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['sealed'])" 2>/dev/null || echo "true")
+      | jq -r '.sealed' 2>/dev/null || echo "true")
     if [[ "$sealed" == "false" ]]; then
       log_success "OpenBao is unsealed and ready"
     else
@@ -1032,7 +1041,7 @@ install_phase_2() {
     local node_id
     node_id=$(kubectl exec -n garage garage-0 -- curl -sf \
       -H "Authorization: Bearer ${garage_admin_token}" \
-      "${garage_api}/v1/status" 2>/dev/null | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['node'])" 2>/dev/null || echo "")
+      "${garage_api}/v1/status" 2>/dev/null | jq -r '.node' 2>/dev/null || echo "")
 
     if [[ -n "$node_id" ]]; then
       kubectl exec -n garage garage-0 -- curl -sf -X POST \
@@ -1045,7 +1054,7 @@ install_phase_2() {
       local layout_version
       layout_version=$(kubectl exec -n garage garage-0 -- curl -sf \
         -H "Authorization: Bearer ${garage_admin_token}" \
-        "${garage_api}/v1/layout" 2>/dev/null | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['version'])" 2>/dev/null || echo "1")
+        "${garage_api}/v1/layout" 2>/dev/null | jq -r '.version' 2>/dev/null || echo "1")
       kubectl exec -n garage garage-0 -- curl -sf -X POST \
         -H "Authorization: Bearer ${garage_admin_token}" \
         -H "Content-Type: application/json" \
@@ -1069,8 +1078,8 @@ install_phase_2() {
 
       if [[ -n "$key_response" ]]; then
         local ak sk
-        ak=$(echo "$key_response" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['accessKeyId'])" 2>/dev/null)
-        sk=$(echo "$key_response" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['secretAccessKey'])" 2>/dev/null)
+        ak=$(echo "$key_response" | jq -r '.accessKeyId' 2>/dev/null)
+        sk=$(echo "$key_response" | jq -r '.secretAccessKey' 2>/dev/null)
 
         if [[ -n "$ak" ]] && [[ -n "$sk" ]]; then
           $BAO bao kv put "secret/garage/${svc_name}" \
@@ -1384,8 +1393,8 @@ install_phase_4() {
           "${garage_api}/v1/key" 2>/dev/null || echo "")
         if [[ -n "$key_resp" ]]; then
           local ak sk
-          ak=$(echo "$key_resp" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['accessKeyId'])" 2>/dev/null)
-          sk=$(echo "$key_resp" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['secretAccessKey'])" 2>/dev/null)
+          ak=$(echo "$key_resp" | jq -r '.accessKeyId' 2>/dev/null)
+          sk=$(echo "$key_resp" | jq -r '.secretAccessKey' 2>/dev/null)
           $BAO bao kv put secret/garage/artifacts access_key="$ak" secret_key="$sk" >/dev/null 2>&1
           log_success "Garage artifacts key created and stored in OpenBao"
         else
@@ -1537,7 +1546,7 @@ install_phase_5() {
       --form "description=k8s-runner" \
       --form "tag_list=k8s,docker" 2>/dev/null)
 
-    local runner_token=$(echo "$runner_response" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('token',''))" 2>/dev/null)
+    local runner_token=$(echo "$runner_response" | jq -r '.token // empty' 2>/dev/null)
 
     if [[ -z "$runner_token" ]]; then
       log_warn "Runner registration failed. Register manually later."
@@ -1688,7 +1697,7 @@ install_phase_6() {
     AK_TOKEN=$(curl -sk "${LOCAL_AK}/api/v1/auth/login" \
       -H "Content-Type: application/json" \
       -d "{\"username\":\"admin\",\"password\":\"${AK_ADMIN_PASS}\"}" | \
-      python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])" 2>/dev/null)
+      jq -r '.access_token' 2>/dev/null)
 
     # Create korifi Docker repo (idempotent — ignore if exists)
     curl -sk "${LOCAL_AK}/api/v1/repositories" \
@@ -1700,7 +1709,7 @@ install_phase_6() {
     local REPO_ID
     REPO_ID=$(curl -sk "${LOCAL_AK}/api/v1/repositories/korifi" \
       -H "Authorization: Bearer ${AK_TOKEN}" 2>/dev/null | \
-      python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+      jq -r '.id // empty' 2>/dev/null || true)
     if [ -n "$REPO_ID" ]; then
       curl -sk -X PATCH "${LOCAL_AK}/api/v1/repositories/korifi" \
         -H "Authorization: Bearer ${AK_TOKEN}" \
