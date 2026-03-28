@@ -1090,33 +1090,34 @@ install_phase_2() {
 
     local garage_api="http://localhost:13903"
     local node_id
-    node_id=$(curl -sf -H "Authorization: Bearer ${garage_admin_token}" \
-      "${garage_api}/v2/GetClusterStatus" 2>/dev/null | jq -r '.node' 2>/dev/null || echo "")
+    node_id=$(curl -s -H "Authorization: Bearer ${garage_admin_token}" \
+      "${garage_api}/v2/GetClusterStatus" 2>/dev/null | jq -r '.nodes[0].id // empty' 2>/dev/null || echo "")
 
-    if [[ -n "$node_id" ]] && [[ "$node_id" != "null" ]]; then
-      # Assign node to layout
-      curl -sf -X POST -H "Authorization: Bearer ${garage_admin_token}" \
+    if [[ -n "$node_id" ]]; then
+      # Assign node to layout (v2 uses "roles" field, not "assignLayout")
+      curl -s -X POST -H "Authorization: Bearer ${garage_admin_token}" \
         -H "Content-Type: application/json" \
-        -d "[{\"id\":\"${node_id}\",\"zone\":\"dc1\",\"capacity\":214748364800,\"tags\":[\"node1\"]}]" \
+        -d "{\"roles\":[{\"id\":\"${node_id}\",\"zone\":\"dc1\",\"capacity\":214748364800,\"tags\":[\"node1\"]}]}" \
         "${garage_api}/v2/UpdateClusterLayout" >/dev/null 2>&1 || true
 
-      # Apply layout
+      # Apply layout (version must be current+1, i.e. 1 for first apply)
       local layout_version
-      layout_version=$(curl -sf -H "Authorization: Bearer ${garage_admin_token}" \
-        "${garage_api}/v2/GetClusterLayout" 2>/dev/null | jq -r '.version' 2>/dev/null || echo "1")
-      curl -sf -X POST -H "Authorization: Bearer ${garage_admin_token}" \
+      layout_version=$(curl -s -H "Authorization: Bearer ${garage_admin_token}" \
+        "${garage_api}/v2/GetClusterLayout" 2>/dev/null | jq -r '(.version + 1)' 2>/dev/null || echo "1")
+      curl -s -X POST -H "Authorization: Bearer ${garage_admin_token}" \
         -H "Content-Type: application/json" \
         -d "{\"version\":${layout_version}}" \
         "${garage_api}/v2/ApplyClusterLayout" >/dev/null 2>&1 || true
 
-      log_success "Garage node layout configured (node: ${node_id:0:12}...)"
+      log_success "Garage node layout configured (node: ${node_id:0:16}...)"
     else
       log_warn "Could not get Garage node ID — layout not configured"
     fi
 
     # Verify health
     local health
-    health=$(curl -sf "${garage_api}/v2/GetClusterHealth" 2>/dev/null | jq -r '.status' 2>/dev/null || echo "unknown")
+    health=$(curl -s -H "Authorization: Bearer ${garage_admin_token}" \
+      "${garage_api}/v2/GetClusterHealth" 2>/dev/null | jq -r '.status // "unknown"' 2>/dev/null || echo "unknown")
     if [[ "$health" == "healthy" ]]; then
       log_success "Garage is healthy"
     else
@@ -1175,10 +1176,10 @@ install_phase_2() {
       token="${garage_admin_token}" >/dev/null 2>&1 || true
     log_success "Garage admin token stored in OpenBao"
 
-    # Re-add probes now that layout is configured and health returns 200
+    # Re-add TCP probes (v2 health requires auth, so use TCP on admin port)
     kubectl patch statefulset garage -n garage --type='json' -p='[
-      {"op":"add","path":"/spec/template/spec/containers/0/livenessProbe","value":{"httpGet":{"path":"/v2/GetClusterHealth","port":3903},"initialDelaySeconds":15,"periodSeconds":30,"failureThreshold":3}},
-      {"op":"add","path":"/spec/template/spec/containers/0/readinessProbe","value":{"httpGet":{"path":"/v2/GetClusterHealth","port":3903},"initialDelaySeconds":5,"periodSeconds":10,"failureThreshold":3}}
+      {"op":"add","path":"/spec/template/spec/containers/0/livenessProbe","value":{"tcpSocket":{"port":3903},"initialDelaySeconds":30,"periodSeconds":30,"failureThreshold":5}},
+      {"op":"add","path":"/spec/template/spec/containers/0/readinessProbe","value":{"tcpSocket":{"port":3903},"initialDelaySeconds":10,"periodSeconds":10,"failureThreshold":5}}
     ]' 2>/dev/null || true
 
     log_success "Garage installed and bootstrapped"
