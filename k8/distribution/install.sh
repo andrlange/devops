@@ -100,6 +100,67 @@ PHASE1
 }
 
 # =============================================================================
+# substitute_domains — Replace hardcoded domains across all K8s manifests
+# =============================================================================
+substitute_domains() {
+  log_info "Substituting domains across manifests..."
+
+  local platform_domain="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+  local apps_domain="${APPS_DOMAIN:-app.cfapps.cool}"
+  local acme_email="${ACME_EMAIL:-admin@cfapps.cool}"
+
+  # Extract base domain from PLATFORM_DOMAIN (e.g., "development.yotta-cloud.net" → "yotta-cloud.net")
+  local base_domain="${platform_domain#*.}"
+  if [[ -z "$base_domain" ]] || [[ "$base_domain" == "$platform_domain" ]]; then
+    base_domain="cfapps.cool"
+  fi
+
+  # Skip if domains are still the defaults (no substitution needed)
+  if [[ "$platform_domain" == "development.cfapps.cool" ]]; then
+    log_info "Using default domains — no substitution needed"
+    return 0
+  fi
+
+  local count=0
+  while IFS= read -r -d '' file; do
+    # Skip .install-config and .install-state
+    [[ "$file" == *".install-"* ]] && continue
+
+    local changed=false
+    if grep -q "development\.cfapps\.cool" "$file" 2>/dev/null; then
+      sed -i '' "s/development\.cfapps\.cool/${platform_domain}/g" "$file"
+      changed=true
+    fi
+    if grep -q "app\.cfapps\.cool" "$file" 2>/dev/null; then
+      sed -i '' "s/app\.cfapps\.cool/${apps_domain}/g" "$file"
+      changed=true
+    fi
+    if grep -q "admin@cfapps\.cool" "$file" 2>/dev/null; then
+      sed -i '' "s/admin@cfapps\.cool/${acme_email}/g" "$file"
+      changed=true
+    fi
+    # Replace bare cfapps.cool in DNS zone configs (cert-manager ClusterIssuer)
+    if grep -q '"cfapps\.cool"' "$file" 2>/dev/null; then
+      sed -i '' "s/\"cfapps\.cool\"/\"${base_domain}\"/g" "$file"
+      changed=true
+    fi
+
+    if [[ "$changed" == "true" ]]; then
+      count=$((count + 1))
+    fi
+  done < <(find "${K8_DIR}" -type f \( -name "*.yaml" -o -name "*.yml" -o -name "*.toml" \) -print0)
+
+  # Also update config.env
+  sed -i '' \
+    -e "s/^PLATFORM_DOMAIN=.*/PLATFORM_DOMAIN=\"${platform_domain}\"/" \
+    -e "s/^APPS_DOMAIN=.*/APPS_DOMAIN=\"${apps_domain}\"/" \
+    -e "s/^ACME_EMAIL=.*/ACME_EMAIL=\"${acme_email}\"/" \
+    "${K8_DIR}/config.env"
+
+  log_success "Domains substituted in ${count} files"
+}
+
+# =============================================================================
 # Iteration Zero — Gather all configuration interactively
 # =============================================================================
 cmd_zero() {
@@ -343,6 +404,9 @@ CFGEOF
 
   # Persist VM name into config.env so stack.sh picks it up without re-sourcing .install-config
   sed -i '' "s/^LIMA_VM_NAME=.*/LIMA_VM_NAME=\"${cfg_lima_vm_name}\"/" "${K8_DIR}/config.env"
+
+  # Substitute domains across all manifests
+  substitute_domains
   echo ""
   log_info "Next steps:"
   echo "  1. Review the configuration:  cat ${CONFIG_FILE}"
