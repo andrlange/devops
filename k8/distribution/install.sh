@@ -672,33 +672,35 @@ BAOEOF
       echo ""
     fi
 
-    # Unseal (need 3 of 5 keys) — skip if keys not available (already initialized in prior run)
-    local sealed_check
-    sealed_check=$(kubectl exec -n openbao openbao-0 -- bao status -format=json 2>/dev/null \
-      | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['sealed'])" 2>/dev/null || echo "true")
-
-    if [[ "$sealed_check" == "true" ]]; then
-      log_info "Unsealing OpenBao..."
+    # Always attempt unseal — even if status reports unsealed (race condition after init)
+    log_info "Unsealing OpenBao..."
+    if [[ -n "${OPENBAO_UNSEAL_KEY_1:-}" ]]; then
+      # Keys available from init — use them
       for key_var in OPENBAO_UNSEAL_KEY_1 OPENBAO_UNSEAL_KEY_2 OPENBAO_UNSEAL_KEY_3; do
         local key="${!key_var:-}"
         if [[ -n "$key" ]]; then
-          kubectl exec -n openbao openbao-0 -- bao operator unseal "$key" >/dev/null 2>&1
+          kubectl exec -n openbao openbao-0 -- bao operator unseal "$key" >/dev/null 2>&1 || true
         fi
       done
+    fi
 
-      # Verify unsealed after unseal attempt
-      local sealed
-      sealed=$(kubectl exec -n openbao openbao-0 -- bao status -format=json 2>/dev/null \
-        | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['sealed'])" 2>/dev/null || echo "true")
-      if [[ "$sealed" == "false" ]]; then
-        log_success "OpenBao is unsealed and ready"
-      else
-        log_error "OpenBao is still sealed. Unseal keys may be missing (was it initialized in a prior run?)."
-        log_error "Manually unseal with: kubectl exec -n openbao openbao-0 -- bao operator unseal <key>"
-        exit 1
-      fi
+    # Wait a moment for seal status to stabilize
+    sleep 2
+
+    # Verify unsealed
+    local sealed
+    sealed=$(kubectl exec -n openbao openbao-0 -- bao status -format=json 2>/dev/null \
+      | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['sealed'])" 2>/dev/null || echo "true")
+    if [[ "$sealed" == "false" ]]; then
+      log_success "OpenBao is unsealed and ready"
     else
-      log_success "OpenBao is already unsealed"
+      log_error "OpenBao is still sealed."
+      if [[ -z "${OPENBAO_UNSEAL_KEY_1:-}" ]]; then
+        log_error "Unseal keys not available (initialized in a prior run)."
+        log_error "Manually unseal with: kubectl exec -n openbao openbao-0 -- bao operator unseal <key>"
+        log_error "Keys are in openbao_credentials.md"
+      fi
+      exit 1
     fi
 
     # --- Automated Bootstrap Secrets ---
