@@ -556,19 +556,20 @@ REGEOF
           kubectl exec -n openbao openbao-0 -- bao operator unseal "$key" >/dev/null 2>&1
         fi
       done
-    else
-      log_info "OpenBao is already unsealed"
-    fi
 
-    # Verify unsealed
-    local sealed
-    sealed=$(kubectl exec -n openbao openbao-0 -- bao status -format=json 2>/dev/null \
-      | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['sealed'])" 2>/dev/null || echo "true")
-    if [[ "$sealed" == "false" ]]; then
-      log_success "OpenBao is unsealed and ready"
+      # Verify unsealed after unseal attempt
+      local sealed
+      sealed=$(kubectl exec -n openbao openbao-0 -- bao status -format=json 2>/dev/null \
+        | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['sealed'])" 2>/dev/null || echo "true")
+      if [[ "$sealed" == "false" ]]; then
+        log_success "OpenBao is unsealed and ready"
+      else
+        log_error "OpenBao is still sealed. Unseal keys may be missing (was it initialized in a prior run?)."
+        log_error "Manually unseal with: kubectl exec -n openbao openbao-0 -- bao operator unseal <key>"
+        exit 1
+      fi
     else
-      log_error "OpenBao is still sealed. Check the unseal keys."
-      exit 1
+      log_success "OpenBao is already unsealed"
     fi
 
     # --- Automated Bootstrap Secrets ---
