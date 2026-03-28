@@ -6,3 +6,5 @@ k8/unseal.sh
 k8/distribution/.install-config
 k8/distribution/.install-state
 .worktrees/
+credentials.md
+dist/

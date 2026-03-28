@@ -277,6 +277,9 @@ CFGEOF
 
   chmod 600 "$CONFIG_FILE"
   log_success "Configuration saved to $CONFIG_FILE"
+
+  # Persist VM name into config.env so stack.sh picks it up without re-sourcing .install-config
+  sed -i '' "s/^LIMA_VM_NAME=.*/LIMA_VM_NAME=\"${cfg_lima_vm_name}\"/" "${K8_DIR}/config.env"
   echo ""
   log_info "Next steps:"
   echo "  1. Review the configuration:  cat ${CONFIG_FILE}"
@@ -312,24 +315,20 @@ install_phase_1() {
   if ! component_is_installed "LIMA_K3S" "$STATE_FILE"; then
     log_step "1.1 — Lima VM + K3s"
 
-    if limactl list --json 2>/dev/null | grep -q "\"name\":\"${LIMA_VM_NAME}\""; then
-      log_info "Lima VM '${LIMA_VM_NAME}' already exists"
-      local vm_status
-      vm_status=$(limactl list --json 2>/dev/null \
-        | grep "\"name\":\"${LIMA_VM_NAME}\"" \
-        | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['status'])" 2>/dev/null || echo "unknown")
-      if [[ "$vm_status" != "Running" ]]; then
-        log_info "Starting Lima VM..."
-        limactl start "$LIMA_VM_NAME"
-      else
-        log_info "Lima VM already running"
-      fi
-    else
-      log_info "Creating Lima VM '${LIMA_VM_NAME}'..."
-      limactl create --name="$LIMA_VM_NAME" "${K8_DIR}/bootstrap/lima.yaml"
-      limactl start "$LIMA_VM_NAME"
-      log_success "Lima VM created and started"
+    # Check if VM name already exists (prevent accidental overwrite)
+    if limactl list --json 2>/dev/null | jq -e --arg name "$LIMA_VM_NAME" 'select(.name == $name)' &>/dev/null; then
+      log_error "Lima VM '${LIMA_VM_NAME}' already exists."
+      log_error "Choose a different name or delete the existing VM with:"
+      log_error "  limactl delete ${LIMA_VM_NAME}"
+      log_error "  or: ./k8/stack.sh deletestack"
+      exit 1
     fi
+
+    # Create new VM
+    log_info "Creating Lima VM '${LIMA_VM_NAME}'..."
+    limactl create --name="$LIMA_VM_NAME" "${K8_DIR}/bootstrap/lima.yaml"
+    limactl start "$LIMA_VM_NAME"
+    log_success "Lima VM created and started"
 
     # Get VM IP
     VM_IP=$(limactl shell "$LIMA_VM_NAME" hostname -I | awk '{print $1}')
