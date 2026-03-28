@@ -20,7 +20,7 @@ fi
 # shellcheck source=config.env
 source "${SCRIPT_DIR}/config.env"
 
-KUBECONFIG_HOST="${HOME}/.kube/config-k3s"
+KUBECONFIG_HOST="${HOME}/.kube/config-${LIMA_VM_NAME}"
 KUBE_CONTEXT="k3s-${LIMA_VM_NAME}"
 
 # Domain fallbacks (support both old BASE_DOMAIN and new PLATFORM_DOMAIN/APPS_DOMAIN)
@@ -159,6 +159,7 @@ select_vm() {
 cmd_start() {
     LIMA_VM_NAME=$(select_vm) || exit 1
     KUBE_CONTEXT="k3s-${LIMA_VM_NAME}"
+    KUBECONFIG_HOST="${HOME}/.kube/config-${LIMA_VM_NAME}"
 
     header "Starting K8s DevOps Stack"
 
@@ -349,6 +350,7 @@ cmd_stop() {
     fi
     LIMA_VM_NAME="$running_vm"
     KUBE_CONTEXT="k3s-${LIMA_VM_NAME}"
+    KUBECONFIG_HOST="${HOME}/.kube/config-${LIMA_VM_NAME}"
 
     local do_backup=false
     for arg in "$@"; do
@@ -395,6 +397,7 @@ cmd_status() {
     fi
     LIMA_VM_NAME="$running_vm"
     KUBE_CONTEXT="k3s-${LIMA_VM_NAME}"
+    KUBECONFIG_HOST="${HOME}/.kube/config-${LIMA_VM_NAME}"
 
     header "K8s DevOps Stack Status"
 

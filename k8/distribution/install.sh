@@ -387,14 +387,22 @@ install_phase_1() {
       exit 1
     fi
 
-    # Create new VM
+    # Create new VM — patch lima.yaml mount path to current k8/ directory
     log_info "Creating Lima VM '${LIMA_VM_NAME}'..."
-    limactl create --name="$LIMA_VM_NAME" "${K8_DIR}/bootstrap/lima.yaml"
+    local lima_yaml_tmp="${K8_DIR}/bootstrap/lima-${LIMA_VM_NAME}.yaml"
+    sed 's|  - location: .*/k8"|  - location: "'"${K8_DIR}"'"|' "${K8_DIR}/bootstrap/lima.yaml" > "$lima_yaml_tmp"
+    limactl create --name="$LIMA_VM_NAME" "$lima_yaml_tmp"
+    rm -f "$lima_yaml_tmp"
     limactl start "$LIMA_VM_NAME"
     log_success "Lima VM created and started"
 
-    # Get VM IP
-    VM_IP=$(limactl shell "$LIMA_VM_NAME" hostname -I | awk '{print $1}')
+    # Get VM IP — use lima0 interface (vzNAT, reachable from host)
+    VM_IP=$(limactl shell "$LIMA_VM_NAME" ip -4 addr show lima0 2>/dev/null \
+      | awk '/inet / {split($2, a, "/"); print a[1]}')
+    if [[ -z "$VM_IP" ]]; then
+      # Fallback to first IP
+      VM_IP=$(limactl shell "$LIMA_VM_NAME" hostname -I | awk '{print $1}')
+    fi
     if [[ -z "$VM_IP" ]]; then
       log_error "Could not determine VM IP address"
       exit 1
@@ -406,16 +414,18 @@ install_phase_1() {
       log_info "K3s already installed in VM"
     else
       log_info "Installing K3s inside Lima VM..."
-      limactl shell "$LIMA_VM_NAME" /mnt/k8/bootstrap/install-k3s.sh "$VM_IP"
+      limactl copy "${K8_DIR}/bootstrap/install-k3s.sh" "${LIMA_VM_NAME}:/tmp/install-k3s.sh"
+      limactl shell "$LIMA_VM_NAME" chmod +x /tmp/install-k3s.sh
+      limactl shell "$LIMA_VM_NAME" /tmp/install-k3s.sh "$VM_IP"
       log_success "K3s installed"
     fi
 
-    # Export kubeconfig
-    local kubeconfig_file="${HOME}/.kube/config-k3s"
+    # Export kubeconfig — per-VM file to support multiple stacks
+    local kubeconfig_file="${HOME}/.kube/config-${LIMA_VM_NAME}"
     mkdir -p "${HOME}/.kube"
     limactl shell "$LIMA_VM_NAME" sudo cat /etc/rancher/k3s/k3s.yaml \
       | sed "s/127\.0\.0\.1/${VM_IP}/g" \
-      | sed "s/default/k3s-devops/g" \
+      | sed "s/default/k3s-${LIMA_VM_NAME}/g" \
       > "$kubeconfig_file"
     chmod 600 "$kubeconfig_file"
     export KUBECONFIG="$kubeconfig_file"
@@ -438,7 +448,7 @@ install_phase_1() {
   else
     log_info "Lima VM + K3s already installed, skipping"
     # Still need to set KUBECONFIG
-    export KUBECONFIG="${HOME}/.kube/config-k3s"
+    export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
   fi
 
   # --- 1.2 Pull Secrets ---
@@ -510,7 +520,7 @@ REGEOF
     echo "  OpenBao is running but needs initialization and unsealing."
     echo "  In a separate terminal, run:"
     echo ""
-    echo "    export KUBECONFIG=\${HOME}/.kube/config-k3s"
+    echo "    export KUBECONFIG=\${HOME}/.kube/config-${LIMA_VM_NAME}"
     echo "    kubectl exec -n openbao openbao-0 -- bao operator init"
     echo ""
     echo "    >> SAVE the unseal keys and root token in your password manager! <<"
@@ -707,7 +717,7 @@ install_phase_2() {
   log_phase "Phase 2 — Platform"
   load_config
   check_phase_prerequisites 2 "$STATE_FILE"
-  export KUBECONFIG="${HOME}/.kube/config-k3s"
+  export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
 
   # --- 2.1 ArgoCD ---
   if ! component_is_installed "ARGOCD" "$STATE_FILE"; then
@@ -862,7 +872,7 @@ install_phase_3() {
   log_phase "Phase 3 — Monitoring"
   load_config
   check_phase_prerequisites 3 "$STATE_FILE"
-  export KUBECONFIG="${HOME}/.kube/config-k3s"
+  export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
 
   # --- 3.1 Loki ---
   if ! component_is_installed "LOKI" "$STATE_FILE"; then
@@ -1012,7 +1022,7 @@ install_phase_4() {
   log_phase "Phase 4 — Services (artifact-keeper)"
   load_config
   check_phase_prerequisites 4 "$STATE_FILE"
-  export KUBECONFIG="${HOME}/.kube/config-k3s"
+  export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
 
   # --- Create Garage key for artifacts bucket ---
   if ! component_is_installed "phase4_garage_key" "$STATE_FILE"; then
@@ -1073,7 +1083,7 @@ install_phase_5() {
   log_phase "Phase 5 — GitLab CE + Runner"
   load_config
   check_phase_prerequisites 5 "$STATE_FILE"
-  export KUBECONFIG="${HOME}/.kube/config-k3s"
+  export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
 
   local GITLAB_DOMAIN="${PLATFORM_DOMAIN:-development.cfapps.cool}"
 
@@ -1208,7 +1218,7 @@ install_phase_6() {
   load_config
   # Phase 6 only requires Phase 1-3, not 4-5
   # Custom prerequisite check instead of check_phase_prerequisites
-  export KUBECONFIG="${HOME}/.kube/config-k3s"
+  export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
 
   local CF_DOMAIN="${APPS_DOMAIN:-app.cfapps.cool}"
 
@@ -1664,8 +1674,8 @@ subjects:
   name: cf-admin
 CRBEOF
 
-    # Add cf-admin context to existing kubeconfig (config-k3s)
-    local MAIN_KUBECONFIG="${CF_ADMIN_DIR}/config-k3s"
+    # Add cf-admin context to existing kubeconfig
+    local MAIN_KUBECONFIG="${CF_ADMIN_DIR}/config-${LIMA_VM_NAME}"
     local CLUSTER_SERVER CLUSTER_CA
     CLUSTER_SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
     CLUSTER_CA=$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
@@ -1698,8 +1708,8 @@ CRBEOF
     mv "${MAIN_KUBECONFIG}.merged" "${MAIN_KUBECONFIG}"
     rm -f "${TMP_CFKUBECONFIG}"
 
-    # Switch back to k3s-devops context
-    kubectl --kubeconfig="${MAIN_KUBECONFIG}" config use-context k3s-devops 2>/dev/null
+    # Switch back to main context
+    kubectl --kubeconfig="${MAIN_KUBECONFIG}" config use-context "k3s-${LIMA_VM_NAME}" 2>/dev/null
 
     # Verify permissions with cf-admin context
     local can_list
@@ -1722,9 +1732,9 @@ CRBEOF
   echo -e "  ${BOLD}CF API:${NC}     https://api.${CF_DOMAIN}"
   echo -e "  ${BOLD}App Domain:${NC} *.${CF_DOMAIN}"
   echo ""
-  echo -e "  ${BOLD}Kubeconfig:${NC} export KUBECONFIG=~/.kube/config-k3s"
+  echo -e "  ${BOLD}Kubeconfig:${NC} export KUBECONFIG=~/.kube/config-${LIMA_VM_NAME}"
   echo -e "  ${BOLD}Contexts:${NC}"
-  echo -e "    kubectl config use-context k3s-devops   # Cluster Admin"
+  echo -e "    kubectl config use-context k3s-${LIMA_VM_NAME}   # Cluster Admin"
   echo -e "    kubectl config use-context cf-admin      # CF Operations"
   echo ""
   echo -e "  ${BOLD}Next steps:${NC}"
@@ -1745,7 +1755,7 @@ CRBEOF
 install_phase_7() {
   log_phase "Phase 7 — CF Service Brokers"
   load_config
-  export KUBECONFIG="${HOME}/.kube/config-k3s"
+  export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
 
   # --- Install CloudNativePG operator ---
   if ! component_is_installed "phase7_cnpg" "$STATE_FILE"; then
@@ -1889,7 +1899,7 @@ install_phase_7() {
     cf enable-service-access s3 2>&1 | tail -1
 
     # Switch back
-    kubectl config use-context k3s-devops 2>/dev/null || true
+    kubectl config use-context k3s-${LIMA_VM_NAME} 2>/dev/null || true
 
     log_success "Service broker registered — cf marketplace shows all services"
     mark_component_installed "phase7_broker_register" "$STATE_FILE"
@@ -1923,7 +1933,7 @@ install_phase_8() {
   if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
   fi
-  export KUBECONFIG="${HOME}/.kube/config-k3s"
+  export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
 
   # Load APPS_DOMAIN from config.env if not in install-config
   local KAPPMAN_CONFIG_ENV
@@ -2000,7 +2010,7 @@ for ns in sorted(namespaces):
   # --- Generate long-lived token (requires cluster-admin context) ---
   log_step "Generating Korifi API token..."
   local CF_TOKEN
-  CF_TOKEN=$(kubectl --context=k3s-devops create token kappman-cf-admin -n korifi --duration=8760h 2>/dev/null \
+  CF_TOKEN=$(kubectl --context=k3s-${LIMA_VM_NAME} create token kappman-cf-admin -n korifi --duration=8760h 2>/dev/null \
     || kubectl create token kappman-cf-admin -n korifi --duration=8760h)
   log_success "Token generated (valid for 1 year)"
 
@@ -2125,8 +2135,8 @@ for ns in sorted(namespaces):
     log_warn "kappman health check returned: $health_status (may need time to start)"
   fi
 
-  # Switch back to k3s-devops context
-  kubectl config use-context k3s-devops 2>/dev/null
+  # Switch back to k3s-${LIMA_VM_NAME} context
+  kubectl config use-context k3s-${LIMA_VM_NAME} 2>/dev/null
 
   write_credentials
   mark_phase_complete 8 "$STATE_FILE"
@@ -2236,8 +2246,8 @@ cmd_status() {
   echo ""
 
   # --- Live cluster status ---
-  if [[ -f "${HOME}/.kube/config-k3s" ]]; then
-    export KUBECONFIG="${HOME}/.kube/config-k3s"
+  if [[ -f "${HOME}/.kube/config-${LIMA_VM_NAME}" ]]; then
+    export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
     print_section "Cluster Health"
     if kubectl get nodes --request-timeout=5s &>/dev/null; then
       kubectl get nodes -o wide 2>/dev/null | sed 's/^/  /'
