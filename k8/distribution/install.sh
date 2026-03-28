@@ -698,14 +698,13 @@ POLICY' >/dev/null 2>&1
 
     ensure_namespace "metallb-system"
     helm_install_if_needed "metallb" "${K8_DIR}/infrastructure/metallb" "metallb-system"
-    wait_for_pods "metallb-system" 120 || {
-      log_warn "MetalLB pods not all ready yet — waiting 30s and retrying..."
-      sleep 30
-      wait_for_pods "metallb-system" 120 || log_warn "MetalLB pods may still be starting. Continuing..."
-    }
+    wait_for_pods "metallb-system" 120
 
     if [[ -f "${K8_DIR}/infrastructure/metallb/ip-pool.yaml" ]]; then
-      apply_manifest "${K8_DIR}/infrastructure/metallb/ip-pool.yaml"
+      # Substitute MetalLB IP range from config
+      sed "s|192.168.64.200-192.168.64.210|${METALLB_IP_RANGE}|g" \
+        "${K8_DIR}/infrastructure/metallb/ip-pool.yaml" | kubectl apply -f -
+      log_success "Applied ip-pool.yaml with IP range: ${METALLB_IP_RANGE}"
     fi
 
     mark_component_installed "METALLB" "$STATE_FILE"

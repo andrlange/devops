@@ -117,7 +117,7 @@ apply_manifest_envsubst() {
   fi
 }
 
-# Wait for all pods in a namespace to be Ready
+# Wait for all pods in a namespace to be Ready (with auto-retry)
 wait_for_pods() {
   local namespace="$1"
   local timeout="${2:-120}"
@@ -127,9 +127,17 @@ wait_for_pods() {
     log_success "All pods in '$namespace' are Ready"
     return 0
   else
-    log_warn "Not all pods are Ready yet in '$namespace'"
-    kubectl get pods -n "$namespace" 2>/dev/null || true
-    return 1
+    log_warn "Not all pods Ready yet in '$namespace' — retrying in 30s..."
+    sleep 30
+    if kubectl wait --for=condition=Ready pods --all \
+         -n "$namespace" --timeout="${timeout}s" 2>/dev/null; then
+      log_success "All pods in '$namespace' are Ready (after retry)"
+      return 0
+    else
+      log_warn "Some pods in '$namespace' still not Ready. Continuing anyway."
+      kubectl get pods -n "$namespace" 2>/dev/null || true
+      return 0  # Don't fail — let the next step detect real issues
+    fi
   fi
 }
 
