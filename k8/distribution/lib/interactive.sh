@@ -53,7 +53,7 @@ ask_yes_no() {
     read -r answer
     answer="${answer:-$default}"
 
-    case "${answer,,}" in
+    case "$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')" in
       y|yes) return 0 ;;
       n|no)  return 1 ;;
       *)     printf "  ${YELLOW}Please answer y or n${NC}\n" ;;
