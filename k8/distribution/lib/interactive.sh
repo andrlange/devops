@@ -18,7 +18,7 @@ ask() {
     printf "  ${BOLD}%s${NC}: " "$prompt"
   fi
 
-  read -r answer
+  read -r answer </dev/tty
   echo "${answer:-$default}"
 }
 
@@ -29,7 +29,7 @@ ask_password() {
   local answer
 
   printf "  ${BOLD}%s${NC}: " "$prompt"
-  read -rs answer
+  read -rs answer </dev/tty
   echo "" >&2  # newline after hidden input
   echo "$answer"
 }
@@ -50,7 +50,7 @@ ask_yes_no() {
   while true; do
     printf "  ${BOLD}%s${NC} ${DIM}[%s]${NC}: " "$prompt" "$hint"
     local answer
-    read -r answer
+    read -r answer </dev/tty
     answer="${answer:-$default}"
 
     case "$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')" in
@@ -82,7 +82,7 @@ ask_choice() {
   printf "  ${BOLD}Choice${NC} ${DIM}[1]${NC}: "
 
   local answer
-  read -r answer
+  read -r answer </dev/tty
   answer="${answer:-1}"
 
   # Validate numeric input
