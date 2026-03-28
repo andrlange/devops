@@ -3,6 +3,10 @@
 # interactive.sh — Interactive input helper functions
 # =============================================================================
 # Assumes colors.sh has been sourced.
+#
+# IMPORTANT: All prompt output goes to stderr (>&2) so that functions
+# called via command substitution (e.g. result=$(ask "Q" "default"))
+# only capture the return value on stdout, not the prompts.
 # =============================================================================
 
 # Ask a question with a default value
@@ -13,9 +17,9 @@ ask() {
   local answer
 
   if [[ -n "$default" ]]; then
-    printf "  ${BOLD}%s${NC} ${DIM}[%s]${NC}: " "$prompt" "$default"
+    printf "  ${BOLD}%s${NC} ${DIM}[%s]${NC}: " "$prompt" "$default" >&2
   else
-    printf "  ${BOLD}%s${NC}: " "$prompt"
+    printf "  ${BOLD}%s${NC}: " "$prompt" >&2
   fi
 
   read -r answer </dev/tty
@@ -28,7 +32,7 @@ ask_password() {
   local prompt="$1"
   local answer
 
-  printf "  ${BOLD}%s${NC}: " "$prompt"
+  printf "  ${BOLD}%s${NC}: " "$prompt" >&2
   read -rs answer </dev/tty
   echo "" >&2  # newline after hidden input
   echo "$answer"
@@ -48,7 +52,7 @@ ask_yes_no() {
   fi
 
   while true; do
-    printf "  ${BOLD}%s${NC} ${DIM}[%s]${NC}: " "$prompt" "$hint"
+    printf "  ${BOLD}%s${NC} ${DIM}[%s]${NC}: " "$prompt" "$hint" >&2
     local answer
     read -r answer </dev/tty
     answer="${answer:-$default}"
@@ -56,7 +60,7 @@ ask_yes_no() {
     case "$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')" in
       y|yes) return 0 ;;
       n|no)  return 1 ;;
-      *)     printf "  ${YELLOW}Please answer y or n${NC}\n" ;;
+      *)     printf "  ${YELLOW}Please answer y or n${NC}\n" >&2 ;;
     esac
   done
 }
@@ -70,16 +74,16 @@ ask_choice() {
   local options=("$@")
   local default="${options[0]}"
 
-  printf "  ${BOLD}%s${NC}\n" "$prompt"
+  printf "  ${BOLD}%s${NC}\n" "$prompt" >&2
   local i
   for i in "${!options[@]}"; do
     local marker=""
     if [[ "${options[$i]}" == "$default" ]]; then
       marker=" ${DIM}(default)${NC}"
     fi
-    printf "    ${CYAN}%d)${NC} %s%s\n" "$((i + 1))" "${options[$i]}" "$marker"
+    printf "    ${CYAN}%d)${NC} %s%s\n" "$((i + 1))" "${options[$i]}" "$marker" >&2
   done
-  printf "  ${BOLD}Choice${NC} ${DIM}[1]${NC}: "
+  printf "  ${BOLD}Choice${NC} ${DIM}[1]${NC}: " >&2
 
   local answer
   read -r answer </dev/tty
@@ -110,7 +114,7 @@ ask_file() {
     fi
 
     if [[ -z "$answer" ]]; then
-      printf "  ${RED}A file path is required${NC}\n"
+      printf "  ${RED}A file path is required${NC}\n" >&2
       continue
     fi
 
@@ -121,7 +125,7 @@ ask_file() {
       echo "$answer"
       return 0
     else
-      printf "  ${RED}File not found: %s${NC}\n" "$answer"
+      printf "  ${RED}File not found: %s${NC}\n" "$answer" >&2
       if [[ "$required" == "optional" ]]; then
         if ask_yes_no "Skip this?" "y"; then
           echo ""
@@ -146,13 +150,13 @@ ask_password_or_generate() {
   local prompt="$1"
   local length="${2:-24}"
 
-  printf "  ${BOLD}%s${NC}\n" "$prompt"
-  printf "    ${CYAN}1)${NC} Generate random password ${DIM}(recommended)${NC}\n"
-  printf "    ${CYAN}2)${NC} Enter manually\n"
-  printf "  ${BOLD}Choice${NC} ${DIM}[1]${NC}: "
+  printf "  ${BOLD}%s${NC}\n" "$prompt" >&2
+  printf "    ${CYAN}1)${NC} Generate random password ${DIM}(recommended)${NC}\n" >&2
+  printf "    ${CYAN}2)${NC} Enter manually\n" >&2
+  printf "  ${BOLD}Choice${NC} ${DIM}[1]${NC}: " >&2
 
   local choice
-  read -r choice
+  read -r choice </dev/tty
   choice="${choice:-1}"
 
   case "$choice" in
@@ -180,10 +184,10 @@ confirm_summary() {
   local header="$1"
   shift
 
-  echo ""
-  print_separator
-  printf "${BOLD}${CYAN}%s${NC}\n" "$header"
-  print_separator
+  echo "" >&2
+  print_separator >&2
+  printf "${BOLD}${CYAN}%s${NC}\n" "$header" >&2
+  print_separator >&2
 
   for item in "$@"; do
     local key="${item%%=*}"
@@ -193,17 +197,17 @@ confirm_summary() {
       if [[ -n "$value" ]]; then
         local masked
         masked="$(echo "$value" | head -c 3)***"
-        printf "  ${BOLD}%-28s${NC} %s\n" "$key" "$masked"
+        printf "  ${BOLD}%-28s${NC} %s\n" "$key" "$masked" >&2
       else
-        printf "  ${BOLD}%-28s${NC} ${DIM}(not set)${NC}\n" "$key"
+        printf "  ${BOLD}%-28s${NC} ${DIM}(not set)${NC}\n" "$key" >&2
       fi
     else
-      printf "  ${BOLD}%-28s${NC} %s\n" "$key" "${value:-(not set)}"
+      printf "  ${BOLD}%-28s${NC} %s\n" "$key" "${value:-(not set)}" >&2
     fi
   done
 
-  print_separator
-  echo ""
+  print_separator >&2
+  echo "" >&2
 
   if ask_yes_no "Proceed with these settings?" "y"; then
     return 0
