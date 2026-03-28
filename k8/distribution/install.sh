@@ -514,22 +514,43 @@ REGEOF
     log_info "Waiting for OpenBao pod to be Running..."
     wait_for_pod_running "openbao" "app.kubernetes.io/name=openbao" 120
 
-    echo ""
-    printf "  ${BOLD}${YELLOW}=== INTERACTIVE: OpenBao Init & Unseal ===${NC}\n"
-    echo ""
-    echo "  OpenBao is running but needs initialization and unsealing."
-    echo "  In a separate terminal, run:"
-    echo ""
-    echo "    export KUBECONFIG=\${HOME}/.kube/config-${LIMA_VM_NAME}"
-    echo "    kubectl exec -n openbao openbao-0 -- bao operator init"
-    echo ""
-    echo "    >> SAVE the unseal keys and root token in your password manager! <<"
-    echo ""
-    echo "    kubectl exec -n openbao openbao-0 -- bao operator unseal <key1>"
-    echo "    kubectl exec -n openbao openbao-0 -- bao operator unseal <key2>"
-    echo "    kubectl exec -n openbao openbao-0 -- bao operator unseal <key3>"
-    echo ""
-    read -rp "  Press ENTER when OpenBao is initialized and unsealed... "
+    # --- Automated OpenBao Init & Unseal ---
+    log_info "Initializing OpenBao..."
+
+    # Check if already initialized
+    local init_status
+    init_status=$(kubectl exec -n openbao openbao-0 -- bao status -format=json 2>/dev/null || echo '{"initialized":false}')
+    local is_initialized
+    is_initialized=$(echo "$init_status" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('initialized', False))" 2>/dev/null || echo "False")
+
+    if [[ "$is_initialized" == "True" ]]; then
+      log_info "OpenBao already initialized"
+    else
+      # Initialize with 5 key shares, 3 key threshold
+      local init_output
+      init_output=$(kubectl exec -n openbao openbao-0 -- bao operator init \
+        -key-shares=5 -key-threshold=3 -format=json 2>/dev/null)
+
+      # Extract unseal keys and root token
+      OPENBAO_UNSEAL_KEY_1=$(echo "$init_output" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['unseal_keys_b64'][0])")
+      OPENBAO_UNSEAL_KEY_2=$(echo "$init_output" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['unseal_keys_b64'][1])")
+      OPENBAO_UNSEAL_KEY_3=$(echo "$init_output" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['unseal_keys_b64'][2])")
+      OPENBAO_UNSEAL_KEY_4=$(echo "$init_output" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['unseal_keys_b64'][3])")
+      OPENBAO_UNSEAL_KEY_5=$(echo "$init_output" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['unseal_keys_b64'][4])")
+      OPENBAO_ROOT_TOKEN=$(echo "$init_output" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['root_token'])")
+
+      log_success "OpenBao initialized"
+      log_info "Root Token: ${OPENBAO_ROOT_TOKEN}"
+    fi
+
+    # Unseal (need 3 of 5 keys)
+    log_info "Unsealing OpenBao..."
+    for key_var in OPENBAO_UNSEAL_KEY_1 OPENBAO_UNSEAL_KEY_2 OPENBAO_UNSEAL_KEY_3; do
+      local key="${!key_var}"
+      if [[ -n "$key" ]]; then
+        kubectl exec -n openbao openbao-0 -- bao operator unseal "$key" >/dev/null 2>&1
+      fi
+    done
 
     # Verify unsealed
     local sealed
@@ -538,16 +559,76 @@ REGEOF
     if [[ "$sealed" == "false" ]]; then
       log_success "OpenBao is unsealed and ready"
     else
-      log_warn "OpenBao may still be sealed. Continuing anyway..."
+      log_error "OpenBao is still sealed. Check the unseal keys."
+      exit 1
     fi
 
-    echo ""
-    printf "  ${BOLD}${YELLOW}=== INTERACTIVE: Bootstrap Secrets ===${NC}\n"
-    echo ""
-    echo "  Store your secrets in OpenBao now (DNS credentials, registry, etc.)"
-    echo "  See bootstrap.sh for detailed instructions."
-    echo ""
-    read -rp "  Press ENTER when bootstrap secrets have been stored... "
+    # --- Automated Bootstrap Secrets ---
+    log_info "Bootstrapping OpenBao secrets..."
+
+    local BAO="kubectl exec -n openbao openbao-0 --"
+
+    # Login with root token
+    $BAO bao login "$OPENBAO_ROOT_TOKEN" >/dev/null 2>&1
+
+    # Enable KV v2 secrets engine
+    $BAO bao secrets enable -path=secret kv-v2 2>/dev/null || log_info "KV engine already enabled"
+
+    # Enable Kubernetes auth
+    $BAO bao auth enable kubernetes 2>/dev/null || log_info "K8s auth already enabled"
+    $BAO bao write auth/kubernetes/config \
+      kubernetes_host="https://${KUBERNETES_PORT_443_TCP_ADDR:-kubernetes.default.svc}:443" >/dev/null 2>&1 || \
+    $BAO sh -c 'bao write auth/kubernetes/config kubernetes_host="https://$KUBERNETES_PORT_443_TCP_ADDR:443"' >/dev/null 2>&1
+
+    # Create ESO policy
+    $BAO sh -c 'bao policy write external-secrets - <<POLICY
+path "secret/data/*" { capabilities = ["read"] }
+path "secret/metadata/*" { capabilities = ["read", "list"] }
+POLICY' >/dev/null 2>&1
+
+    # Create ESO role
+    $BAO bao write auth/kubernetes/role/external-secrets \
+      bound_service_account_names=external-secrets \
+      bound_service_account_namespaces=external-secrets \
+      policies=external-secrets \
+      ttl=1h >/dev/null 2>&1
+
+    # Store registry credentials
+    $BAO bao kv put secret/k8s/registry \
+      server="${REGISTRY}" \
+      username="${REGISTRY_USER}" \
+      password="${REGISTRY_PASS}" >/dev/null 2>&1
+    log_success "Registry credentials stored in OpenBao"
+
+    # Store DNS provider credentials
+    if [[ -n "${GCP_SA_JSON_PATH:-}" ]] && [[ -f "${GCP_SA_JSON_PATH:-}" ]]; then
+      # Copy GCP credentials JSON into the pod and store in vault
+      kubectl cp "${GCP_SA_JSON_PATH}" openbao/openbao-0:/tmp/gcp-creds.json >/dev/null 2>&1
+      $BAO sh -c 'bao kv put secret/dns/google-cloud credentials=@/tmp/gcp-creds.json' >/dev/null 2>&1
+      $BAO rm -f /tmp/gcp-creds.json >/dev/null 2>&1
+      log_success "GCP DNS credentials stored in OpenBao"
+    fi
+
+    if [[ -n "${AWS_ACCESS_KEY_ID:-}" ]] && [[ -n "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
+      $BAO bao kv put secret/dns/aws \
+        access_key="${AWS_ACCESS_KEY_ID}" \
+        secret_key="${AWS_SECRET_ACCESS_KEY}" \
+        region="${AWS_REGION:-us-east-1}" >/dev/null 2>&1
+      log_success "AWS DNS credentials stored in OpenBao"
+    fi
+
+    # Store Grafana password
+    if [[ -n "${GRAFANA_ADMIN_PASSWORD:-}" ]]; then
+      $BAO bao kv put secret/grafana/admin \
+        username=admin \
+        password="${GRAFANA_ADMIN_PASSWORD}" >/dev/null 2>&1
+      log_success "Grafana credentials stored in OpenBao"
+    fi
+
+    log_success "OpenBao bootstrap complete"
+
+    # Update credentials.md
+    write_credentials
 
     mark_component_installed "OPENBAO" "$STATE_FILE"
   else
