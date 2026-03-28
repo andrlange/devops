@@ -37,6 +37,69 @@ if [[ -f "${K8_DIR}/config.env" ]]; then
 fi
 
 # =============================================================================
+# write_credentials — Generate/update credentials.md with current secrets
+# =============================================================================
+write_credentials() {
+    local cred_file="${SCRIPT_DIR}/../../credentials.md"
+    local domain="${PLATFORM_DOMAIN:-unknown}"
+
+    cat > "$cred_file" <<'CRED_HEADER'
+# Stack Credentials
+
+> WARNING: Development environment only — do not use in production
+
+CRED_HEADER
+
+    echo "Generated: $(date '+%Y-%m-%d %H:%M') | Domain: ${domain}" >> "$cred_file"
+    echo "" >> "$cred_file"
+
+    # Platform Access section
+    cat >> "$cred_file" <<CRED_TABLE
+## Platform Access
+
+| Service | URL | Username | Password |
+|---------|-----|----------|----------|
+CRED_TABLE
+
+    # Phase 1: OpenBao
+    if [[ -n "${OPENBAO_ROOT_TOKEN:-}" ]]; then
+        cat >> "$cred_file" <<PHASE1
+
+## Infrastructure (Phase 1)
+
+| Service | Details |
+|---------|---------|
+| OpenBao Root Token | \`${OPENBAO_ROOT_TOKEN}\` |
+| OpenBao Unseal Key 1 | \`${OPENBAO_UNSEAL_KEY_1:-}\` |
+| OpenBao Unseal Key 2 | \`${OPENBAO_UNSEAL_KEY_2:-}\` |
+| OpenBao Unseal Key 3 | \`${OPENBAO_UNSEAL_KEY_3:-}\` |
+
+PHASE1
+    fi
+
+    # Phase 2: Platform services
+    [[ -n "${ARGOCD_ADMIN_PASSWORD:-}" ]] && \
+        echo "| ArgoCD | https://argocd.${domain} | admin | \`${ARGOCD_ADMIN_PASSWORD}\` |" >> "$cred_file"
+    [[ -n "${GARAGE_ADMIN_KEY:-}" ]] && \
+        echo "| Garage S3 | Admin Key: \`${GARAGE_ADMIN_KEY}\` / Secret: \`${GARAGE_ADMIN_SECRET:-}\` | | |" >> "$cred_file"
+
+    # Phase 3: Monitoring
+    [[ -n "${GRAFANA_ADMIN_PASSWORD:-}" ]] && \
+        echo "| Grafana | https://grafana.${domain} | admin | \`${GRAFANA_ADMIN_PASSWORD}\` |" >> "$cred_file"
+
+    # Phase 4: Services
+    [[ -n "${AK_ADMIN_PASSWORD:-}" ]] && \
+        echo "| artifact-keeper | https://artifactory.${domain} | admin | \`${AK_ADMIN_PASSWORD}\` |" >> "$cred_file"
+
+    # Phase 5: GitLab
+    [[ -n "${GITLAB_ROOT_PASSWORD:-}" ]] && \
+        echo "| GitLab | https://gitlab.${domain} | root | \`${GITLAB_ROOT_PASSWORD}\` |" >> "$cred_file"
+
+    chmod 600 "$cred_file"
+    log_info "Credentials written to ${cred_file}"
+}
+
+# =============================================================================
 # Iteration Zero — Gather all configuration interactively
 # =============================================================================
 cmd_zero() {
@@ -531,6 +594,19 @@ REGEOF
     fi
 
     mark_component_installed "METALLB" "$STATE_FILE"
+
+    log_info ""
+    log_info "=============================================="
+    log_info "  DNS Configuration Required"
+    log_info "=============================================="
+    log_info ""
+    log_info "  Add these DNS records to your DNS provider:"
+    log_info ""
+    log_info "  *.${PLATFORM_DOMAIN}  ->  A  192.168.64.200"
+    log_info "  *.${APPS_DOMAIN}      ->  A  192.168.64.203"
+    log_info ""
+    log_info "=============================================="
+    log_info ""
   else
     log_info "MetalLB already installed, skipping"
   fi
@@ -614,6 +690,7 @@ REGEOF
     log_info "Kubernetes Reflector already installed, skipping"
   fi
 
+  write_credentials
   mark_phase_complete 1 "$STATE_FILE"
   log_success "Phase 1 — Foundation complete"
   echo ""
@@ -768,6 +845,7 @@ install_phase_2() {
     log_info "Velero UI already installed, skipping"
   fi
 
+  write_credentials
   mark_phase_complete 2 "$STATE_FILE"
   log_success "Phase 2 — Platform complete"
   echo ""
@@ -916,6 +994,7 @@ install_phase_3() {
     log_info "Grafana already installed, skipping"
   fi
 
+  write_credentials
   mark_phase_complete 3 "$STATE_FILE"
   log_success "Phase 3 — Monitoring complete"
   echo ""
@@ -981,6 +1060,7 @@ install_phase_4() {
     mark_component_installed "phase4_artifact_keeper" "$STATE_FILE"
   fi
 
+  write_credentials
   mark_phase_complete 4 "$STATE_FILE"
   log_success "Phase 4 complete — artifact-keeper available at https://artifacts.${PLATFORM_DOMAIN:-development.cfapps.cool}"
   echo ""
@@ -1106,6 +1186,7 @@ install_phase_5() {
     mark_component_installed "phase5_runner" "$STATE_FILE"
   fi
 
+  write_credentials
   mark_phase_complete 5 "$STATE_FILE"
   echo ""
   log_success "Phase 5 complete"
@@ -1633,6 +1714,7 @@ CRBEOF
     mark_component_installed "phase6_cf_admin" "$STATE_FILE"
   fi
 
+  write_credentials
   mark_phase_complete 6 "$STATE_FILE"
   echo ""
   log_success "Phase 6 complete — Cloud Foundry (Korifi)"
@@ -1813,6 +1895,7 @@ install_phase_7() {
     mark_component_installed "phase7_broker_register" "$STATE_FILE"
   fi
 
+  write_credentials
   mark_phase_complete 7 "$STATE_FILE"
   echo ""
   log_success "Phase 7 complete — CF Service Brokers"
@@ -2045,6 +2128,7 @@ for ns in sorted(namespaces):
   # Switch back to k3s-devops context
   kubectl config use-context k3s-devops 2>/dev/null
 
+  write_credentials
   mark_phase_complete 8 "$STATE_FILE"
   echo ""
   log_success "Phase 8 complete — kappman (Korifi App Manager)"
