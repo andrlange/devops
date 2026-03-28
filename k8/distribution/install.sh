@@ -707,43 +707,48 @@ BAOEOF
     local BAO="kubectl exec -n openbao openbao-0 --"
 
     # Login with root token
-    $BAO bao login "$OPENBAO_ROOT_TOKEN" >/dev/null 2>&1
+    if ! $BAO bao login "$OPENBAO_ROOT_TOKEN" >/dev/null 2>&1; then
+      log_error "Failed to login to OpenBao with root token"
+      log_error "Token value: ${OPENBAO_ROOT_TOKEN:-(empty)}"
+      exit 1
+    fi
+    log_success "Logged in to OpenBao"
 
     # Enable KV v2 secrets engine
-    $BAO bao secrets enable -path=secret kv-v2 2>/dev/null || log_info "KV engine already enabled"
+    $BAO bao secrets enable -path=secret kv-v2 >/dev/null 2>&1 || log_info "KV engine already enabled"
 
     # Enable Kubernetes auth
-    $BAO bao auth enable kubernetes 2>/dev/null || log_info "K8s auth already enabled"
-    $BAO bao write auth/kubernetes/config \
-      kubernetes_host="https://${KUBERNETES_PORT_443_TCP_ADDR:-kubernetes.default.svc}:443" >/dev/null 2>&1 || \
-    $BAO sh -c 'bao write auth/kubernetes/config kubernetes_host="https://$KUBERNETES_PORT_443_TCP_ADDR:443"' >/dev/null 2>&1
+    $BAO bao auth enable kubernetes >/dev/null 2>&1 || log_info "K8s auth already enabled"
+    $BAO sh -c 'bao write auth/kubernetes/config kubernetes_host="https://$KUBERNETES_PORT_443_TCP_ADDR:443"' >/dev/null 2>&1 || true
 
     # Create ESO policy
     $BAO sh -c 'bao policy write external-secrets - <<POLICY
 path "secret/data/*" { capabilities = ["read"] }
 path "secret/metadata/*" { capabilities = ["read", "list"] }
-POLICY' >/dev/null 2>&1
+POLICY' >/dev/null 2>&1 || true
 
     # Create ESO role
     $BAO bao write auth/kubernetes/role/external-secrets \
       bound_service_account_names=external-secrets \
       bound_service_account_namespaces=external-secrets \
       policies=external-secrets \
-      ttl=1h >/dev/null 2>&1
+      ttl=1h >/dev/null 2>&1 || true
 
     # Store registry credentials
-    $BAO bao kv put secret/k8s/registry \
+    if $BAO bao kv put secret/k8s/registry \
       server="${REGISTRY}" \
       username="${REGISTRY_USER}" \
-      password="${REGISTRY_PASS}" >/dev/null 2>&1
-    log_success "Registry credentials stored in OpenBao"
+      password="${REGISTRY_PASS}" >/dev/null 2>&1; then
+      log_success "Registry credentials stored in OpenBao"
+    else
+      log_warn "Failed to store registry credentials — continuing"
+    fi
 
     # Store DNS provider credentials
     if [[ -n "${GCP_SA_JSON_PATH:-}" ]] && [[ -f "${GCP_SA_JSON_PATH:-}" ]]; then
-      # Copy GCP credentials JSON into the pod and store in vault
-      kubectl cp "${GCP_SA_JSON_PATH}" openbao/openbao-0:/tmp/gcp-creds.json >/dev/null 2>&1
-      $BAO sh -c 'bao kv put secret/dns/google-cloud credentials=@/tmp/gcp-creds.json' >/dev/null 2>&1
-      $BAO rm -f /tmp/gcp-creds.json >/dev/null 2>&1
+      kubectl cp "${GCP_SA_JSON_PATH}" openbao/openbao-0:/tmp/gcp-creds.json >/dev/null 2>&1 || true
+      $BAO sh -c 'bao kv put secret/dns/google-cloud credentials=@/tmp/gcp-creds.json' >/dev/null 2>&1 || true
+      $BAO rm -f /tmp/gcp-creds.json >/dev/null 2>&1 || true
       log_success "GCP DNS credentials stored in OpenBao"
     fi
 
@@ -751,7 +756,7 @@ POLICY' >/dev/null 2>&1
       $BAO bao kv put secret/dns/aws \
         access_key="${AWS_ACCESS_KEY_ID}" \
         secret_key="${AWS_SECRET_ACCESS_KEY}" \
-        region="${AWS_REGION:-us-east-1}" >/dev/null 2>&1
+        region="${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
       log_success "AWS DNS credentials stored in OpenBao"
     fi
 
@@ -759,7 +764,7 @@ POLICY' >/dev/null 2>&1
     if [[ -n "${GRAFANA_ADMIN_PASSWORD:-}" ]]; then
       $BAO bao kv put secret/grafana/admin \
         username=admin \
-        password="${GRAFANA_ADMIN_PASSWORD}" >/dev/null 2>&1
+        password="${GRAFANA_ADMIN_PASSWORD}" >/dev/null 2>&1 || true
       log_success "Grafana credentials stored in OpenBao"
     fi
 
