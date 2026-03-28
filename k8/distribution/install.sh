@@ -480,6 +480,13 @@ install_phase_1() {
       log_error "Could not determine VM IP address"
       exit 1
     fi
+
+    # Verify VM is on the expected vzNAT subnet (192.168.64.0/24)
+    if [[ "$VM_IP" != 192.168.64.* ]]; then
+      log_warn "VM IP ${VM_IP} is NOT on expected subnet 192.168.64.0/24"
+      log_warn "MetalLB range 192.168.64.200-210 may not be reachable."
+      log_warn "If services are unreachable, adjust METALLB_IP_RANGE in config.env"
+    fi
     log_success "VM IP: $VM_IP"
 
     # Install K3s
