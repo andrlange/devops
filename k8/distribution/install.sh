@@ -864,13 +864,9 @@ install_phase_2() {
     log_step "2.3 — Garage"
     ensure_namespace "garage"
 
-    if [[ -d "${K8_DIR}/platform/garage" ]]; then
-      helm_install_if_needed "garage" "${K8_DIR}/platform/garage" "garage"
-      wait_for_pods "garage" 120
-      log_success "Garage installed"
-    else
-      log_warn "Garage chart not found at ${K8_DIR}/platform/garage — skipping"
-    fi
+    smart_install "garage" "${K8_DIR}/platform/garage" "garage"
+    wait_for_pods "garage" 120
+    log_success "Garage installed"
 
     mark_component_installed "GARAGE" "$STATE_FILE"
   else
@@ -883,7 +879,7 @@ install_phase_2() {
     ensure_namespace "technitium"
 
     if [[ -d "${K8_DIR}/platform/technitium" ]]; then
-      helm_install_if_needed "technitium" "${K8_DIR}/platform/technitium" "technitium"
+      smart_install "technitium" "${K8_DIR}/platform/technitium" "technitium"
       wait_for_pods "technitium" 120
       log_success "Technitium DNS installed"
     else
@@ -1002,7 +998,7 @@ install_phase_3() {
     ensure_namespace "monitoring"
 
     if [[ -d "${K8_DIR}/monitoring/mimir" ]]; then
-      helm_install_if_needed "mimir" "${K8_DIR}/monitoring/mimir" "monitoring"
+      smart_install "mimir" "${K8_DIR}/monitoring/mimir" "monitoring"
       wait_for_pods "monitoring" 180 || true
       log_success "Mimir installed"
     else

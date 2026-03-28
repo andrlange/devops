@@ -5,6 +5,46 @@
 # Assumes colors.sh has been sourced.
 # =============================================================================
 
+# Smart install: detect Helm chart vs Kustomize and install accordingly
+# Usage: smart_install <release> <path> <namespace> [extra_args...]
+smart_install() {
+  local release="$1"
+  local path="$2"
+  local namespace="$3"
+  shift 3
+
+  if [[ -f "${path}/Chart.yaml" ]]; then
+    helm_install_if_needed "$release" "$path" "$namespace" "$@"
+  elif [[ -f "${path}/kustomization.yaml" ]]; then
+    kustomize_install_if_needed "$release" "$path" "$namespace"
+  else
+    log_error "No Chart.yaml or kustomization.yaml found at ${path}"
+    return 1
+  fi
+}
+
+# Install Kustomize resources if not already present
+# Uses a label to track if already applied
+kustomize_install_if_needed() {
+  local release="$1"
+  local path="$2"
+  local namespace="$3"
+
+  # Check if main resources already exist (use deployment/statefulset as indicator)
+  if kubectl get deployments,statefulsets -n "$namespace" -l "app.kubernetes.io/name=${release}" 2>/dev/null | grep -q "${release}"; then
+    log_info "Kustomize release '${release}' already installed in '${namespace}'"
+    return 0
+  fi
+
+  log_info "Applying kustomize manifests for '${release}' in '${namespace}'..."
+  if kubectl apply -k "$path" 2>&1; then
+    log_success "Kustomize release '${release}' applied"
+  else
+    log_error "Failed to apply kustomize manifests for '${release}'"
+    return 1
+  fi
+}
+
 # Install a Helm release if not already present
 # Usage: helm_install_if_needed <release> <chart_path> <namespace> [extra_args...]
 helm_install_if_needed() {
