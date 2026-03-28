@@ -101,21 +101,21 @@ PHASE1
 
 # =============================================================================
 # Phase timing — track duration per phase and print summary
+# Uses simple variables (PHASE_START_1, PHASE_DUR_1, etc.) for bash 3 compat
 # =============================================================================
-declare -A PHASE_START_TIME PHASE_DURATION
-
 phase_timer_start() {
-  PHASE_START_TIME[$1]=$(date +%s)
+  eval "PHASE_START_$1=$(date +%s)"
 }
 
 phase_timer_stop() {
   local phase="$1"
-  local start="${PHASE_START_TIME[$phase]:-$(date +%s)}"
+  local start_var="PHASE_START_${phase}"
+  local start="${!start_var:-$(date +%s)}"
   local end=$(date +%s)
   local elapsed=$((end - start))
   local mins=$((elapsed / 60))
   local secs=$((elapsed % 60))
-  PHASE_DURATION[$phase]="${mins}m ${secs}s"
+  eval "PHASE_DUR_${phase}=\"${mins}m ${secs}s\""
 }
 
 print_phase_timing() {
@@ -123,8 +123,12 @@ print_phase_timing() {
   log_info "────────────────────────────────────"
   log_info "  Phase Timing"
   log_info "────────────────────────────────────"
-  for phase in $(echo "${!PHASE_DURATION[@]}" | tr ' ' '\n' | sort -n); do
-    printf "  ${BOLD}Phase %s${NC}  %s\n" "$phase" "${PHASE_DURATION[$phase]}"
+  for phase in 1 2 3 4 5 6 7; do
+    local dur_var="PHASE_DUR_${phase}"
+    local dur="${!dur_var:-}"
+    if [[ -n "$dur" ]]; then
+      printf "  ${BOLD}Phase %s${NC}  %s\n" "$phase" "$dur"
+    fi
   done
   log_info "────────────────────────────────────"
   echo ""

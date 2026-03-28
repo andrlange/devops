@@ -233,7 +233,7 @@ PHASE_${phase}_TIMESTAMP=${timestamp}
 EOF
 
   # Stop phase timer and print timing summary
-  if declare -p PHASE_START_TIME &>/dev/null 2>&1; then
+  if type phase_timer_stop &>/dev/null; then
     phase_timer_stop "$phase"
     print_phase_timing
   fi
