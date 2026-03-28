@@ -44,15 +44,34 @@ write_credentials() {
     local domain="${PLATFORM_DOMAIN:-unknown}"
     local apps_domain="${APPS_DOMAIN:-app.cfapps.cool}"
 
-    # Try to read credentials from OpenBao if available
+    # Ensure OpenBao is logged in for secret reads
+    if [[ -n "${OPENBAO_ROOT_TOKEN:-}" ]]; then
+      kubectl exec -n openbao openbao-0 -- bao login "${OPENBAO_ROOT_TOKEN}" >/dev/null 2>&1 || true
+    fi
+
+    # Read credentials from multiple sources: script variables → OpenBao → K8s Secrets
     local BAO_GET="kubectl exec -n openbao openbao-0 -- bao kv get -field"
-    local argocd_pw="${ARGOCD_ADMIN_PASSWORD:-$(${BAO_GET}=password secret/argocd/admin 2>/dev/null || echo "")}"
+
+    # ArgoCD: stored in K8s Secret (not OpenBao)
+    local argocd_pw="${ARGOCD_ADMIN_PASSWORD:-$(kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "")}"
+
+    # Grafana: stored in OpenBao
     local grafana_pw="${GRAFANA_ADMIN_PASSWORD:-$(${BAO_GET}=password secret/grafana/admin 2>/dev/null || echo "")}"
+
+    # artifact-keeper: stored in OpenBao
     local ak_pw="${AK_ADMIN_PASSWORD:-$(${BAO_GET}=admin_password secret/artifact-keeper/app 2>/dev/null || echo "")}"
+
+    # GitLab: stored in OpenBao
     local gitlab_pw="${GITLAB_ROOT_PASSWORD:-$(${BAO_GET}=root_password secret/gitlab/admin 2>/dev/null || echo "")}"
+
+    # Garage: stored in OpenBao
     local garage_token="${GARAGE_ADMIN_TOKEN:-$(${BAO_GET}=token secret/garage/admin-token 2>/dev/null || echo "")}"
     local garage_ak="${GARAGE_ADMIN_KEY:-$(${BAO_GET}=access_key secret/garage/admin 2>/dev/null || echo "")}"
     local garage_sk="${GARAGE_ADMIN_SECRET:-$(${BAO_GET}=secret_key secret/garage/admin 2>/dev/null || echo "")}"
+
+    # Velero: S3 credentials from OpenBao
+    local velero_ak="$(${BAO_GET}=access_key secret/garage/velero 2>/dev/null || echo "")"
+    local velero_sk="$(${BAO_GET}=secret_key secret/garage/velero 2>/dev/null || echo "")"
 
     cat > "$cred_file" <<CRED_EOF
 # Stack Credentials
@@ -73,15 +92,24 @@ Apps Domain: ${apps_domain}
 | Grafana | https://grafana.${domain} | admin | \`${grafana_pw:-not yet set}\` |
 | Technitium DNS | https://dns.${domain} | admin | Set on first login |
 
-## Infrastructure
+## Infrastructure — Garage S3
 
 | Service | Details |
 |---------|---------|
-| Garage S3 Admin Token | \`${garage_token:-not yet set}\` |
-| Garage S3 Admin Key | \`${garage_ak:-not yet set}\` |
-| Garage S3 Admin Secret | \`${garage_sk:-not yet set}\` |
+| Garage Admin Token | \`${garage_token:-not yet set}\` |
+| Garage Admin Key | \`${garage_ak:-not yet set}\` |
+| Garage Admin Secret | \`${garage_sk:-not yet set}\` |
 | S3 Endpoint | http://garage.garage.svc:3900 (in-cluster) |
 | S3 Region | garage |
+
+## Backup — Velero
+
+| Service | Details |
+|---------|---------|
+| Velero S3 Key | \`${velero_ak:-not yet set}\` |
+| Velero S3 Secret | \`${velero_sk:-not yet set}\` |
+| Velero Bucket | velero |
+| Backup UI | https://backup.${domain} |
 
 ## Application Services
 
