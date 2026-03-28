@@ -1723,7 +1723,12 @@ spec:
   controllerName: projectcontour.io/gateway-controller
 GCEOF
 
-    # Re-tag Contour/Envoy images in containerd to match provisioner expectations
+    # Pull Contour/Envoy images from artifact-keeper, then re-tag for provisioner expectations
+    log_info "Pre-pulling Contour images..."
+    limactl shell "${LIMA_VM_NAME}" sudo crictl pull --creds "${REGISTRY_USER}:${REGISTRY_PASS}" \
+      "${CONTOUR_REGISTRY}/projectcontour/contour:v1.33.2-arm64" 2>/dev/null || true
+    limactl shell "${LIMA_VM_NAME}" sudo crictl pull --creds "${REGISTRY_USER}:${REGISTRY_PASS}" \
+      "${CONTOUR_REGISTRY}/envoyproxy/envoy:distroless-v1.35.9-arm64" 2>/dev/null || true
     limactl shell "${LIMA_VM_NAME}" sudo ctr -n k8s.io images tag \
       "${CONTOUR_REGISTRY}/projectcontour/contour:v1.33.2-arm64" \
       "ghcr.io/projectcontour/contour:v1.33.3" 2>/dev/null || true
@@ -1770,8 +1775,12 @@ GWEOF
   # --- Install kpack ---
   if ! component_is_installed "phase6_kpack" "$STATE_FILE"; then
     log_step "Installing kpack v0.17.0..."
+    # Apply twice: first pass creates CRDs, second pass creates resources that depend on them
     kubectl apply --server-side --force-conflicts \
-      -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.0/release-0.17.0.yaml 2>&1 | tail -5
+      -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.0/release-0.17.0.yaml 2>&1 | tail -3 || true
+    sleep 5
+    kubectl apply --server-side --force-conflicts \
+      -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.0/release-0.17.0.yaml 2>&1 | tail -3
     wait_for_pods "kpack" 120
     log_success "kpack installed"
     mark_component_installed "phase6_kpack" "$STATE_FILE"
