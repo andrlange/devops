@@ -218,6 +218,28 @@ Configured during `install.sh` Iteration Zero. The installer.sh does NOT ask for
 
 DNS setup (creating service accounts/IAM users) is the **only manual step** — documented in GETTING_STARTED.md with step-by-step CLI commands.
 
+### DNS A-Record Guidance
+
+MetalLB assigns IPs sequentially from the configured pool (default: `192.168.64.200-210`). The IPs are deterministic:
+
+| IP | Service | DNS Record |
+|----|---------|------------|
+| `192.168.64.200` | Traefik (Platform Ingress) | `*.development.<domain>` |
+| `192.168.64.203` | Contour/Envoy (Apps Ingress) | `*.app.<domain>` |
+
+These are vzNAT-local IPs (reachable only on the Mac). Cloud DNS / Route53 are used primarily for cert-manager DNS-01 challenges (TXT records for Let's Encrypt wildcard certs). The A-records can point to these local IPs — the Mac resolves them correctly.
+
+**After Phase 1** (MetalLB deployed), install.sh prints:
+
+```
+Add these DNS records to your DNS provider:
+
+  *.development.<domain>  →  A  192.168.64.200
+  *.app.<domain>          →  A  192.168.64.203
+```
+
+This allows the user to set up DNS records before Phase 1 completes cert-manager setup (which needs the A-records in place for validation). The IPs are stable as long as the MetalLB pool range is unchanged.
+
 ## credentials.md
 
 **NEW FEATURE** — to be implemented in install.sh. Generated automatically during installation, updated after each phase.
