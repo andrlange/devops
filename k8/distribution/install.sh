@@ -698,7 +698,11 @@ POLICY' >/dev/null 2>&1
 
     ensure_namespace "metallb-system"
     helm_install_if_needed "metallb" "${K8_DIR}/infrastructure/metallb" "metallb-system"
-    wait_for_pods "metallb-system" 120
+    wait_for_pods "metallb-system" 120 || {
+      log_warn "MetalLB pods not all ready yet — waiting 30s and retrying..."
+      sleep 30
+      wait_for_pods "metallb-system" 120 || log_warn "MetalLB pods may still be starting. Continuing..."
+    }
 
     if [[ -f "${K8_DIR}/infrastructure/metallb/ip-pool.yaml" ]]; then
       apply_manifest "${K8_DIR}/infrastructure/metallb/ip-pool.yaml"
@@ -2428,9 +2432,27 @@ cmd_full_setup() {
   fi
 
   if phase_is_complete 3 "$STATE_FILE"; then
-    echo ""
-    log_info "Phases 4 (Services) and 5 (GitLab CE) are placeholders."
-    log_info "Run them when charts are ready: ./install.sh phase 4"
+    if ask_yes_no "Continue with Phase 4 (Services)?" "y"; then
+      install_phase_4
+    fi
+  fi
+
+  if phase_is_complete 4 "$STATE_FILE"; then
+    if ask_yes_no "Continue with Phase 5 (GitLab CE)?" "y"; then
+      install_phase_5
+    fi
+  fi
+
+  if phase_is_complete 5 "$STATE_FILE"; then
+    if ask_yes_no "Continue with Phase 6 (Cloud Foundry / Korifi)? [optional]" "n"; then
+      install_phase_6
+    fi
+  fi
+
+  if phase_is_complete 5 "$STATE_FILE"; then
+    if ask_yes_no "Continue with Phase 7 (Service Brokers)? [optional, requires Go]" "n"; then
+      install_phase_7
+    fi
   fi
 
   echo ""
