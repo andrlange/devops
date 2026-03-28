@@ -1678,6 +1678,24 @@ install_phase_6() {
     # Install Contour via official manifests + patch for local images and MetalLB
     kubectl apply -f https://projectcontour.io/quickstart/contour-gateway-provisioner.yaml 2>&1 | tail -5
 
+    # Create GatewayClass (required before Gateway)
+    kubectl apply -f - <<GCEOF
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: contour
+spec:
+  controllerName: projectcontour.io/gateway-controller
+GCEOF
+
+    # Re-tag Contour/Envoy images in containerd to match provisioner expectations
+    limactl shell "${LIMA_VM_NAME}" sudo ctr -n k8s.io images tag \
+      "${CONTOUR_REGISTRY}/projectcontour/contour:v1.33.2-arm64" \
+      "ghcr.io/projectcontour/contour:v1.33.3" 2>/dev/null || true
+    limactl shell "${LIMA_VM_NAME}" sudo ctr -n k8s.io images tag \
+      "${CONTOUR_REGISTRY}/envoyproxy/envoy:distroless-v1.35.9-arm64" \
+      "docker.io/envoyproxy/envoy:distroless-v1.35.9" 2>/dev/null || true
+
     # Create Gateway with MetalLB IP annotation for apps domain
     kubectl apply -f - <<GWEOF
 apiVersion: gateway.networking.k8s.io/v1
