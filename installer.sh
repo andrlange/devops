@@ -66,6 +66,95 @@ fail() {
   FAILED_CHECKS+=("$label: $detail")
 }
 
+# --- Tool checking functions -------------------------------------------------
+
+# Compare two version strings: returns 0 if $1 >= $2
+version_gte() {
+  local v1="$1" v2="$2"
+  local highest
+  highest=$(printf '%s\n%s\n' "$v1" "$v2" | sort -V | tail -1)
+  [[ "$highest" == "$v1" ]]
+}
+
+# check_tool <name> <command> <min_version>
+# min_version can be "" to skip version check
+# Returns 0 if present (and version OK), 1 otherwise
+# Sets TOOL_VERSION_<cmd> variable with detected version
+check_tool() {
+  local name="$1" cmd="$2" min_ver="$3"
+
+  if ! command -v "$cmd" &>/dev/null; then
+    return 1
+  fi
+
+  if [[ -z "$min_ver" ]]; then
+    return 0
+  fi
+
+  # Detect version based on tool
+  local raw_ver=""
+  case "$cmd" in
+    helm)
+      raw_ver=$(helm version --short 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) ;;
+    kubectl)
+      raw_ver=$(kubectl version --client -o json 2>/dev/null | jq -r '.clientVersion.gitVersion' 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) ;;
+    limactl)
+      raw_ver=$(limactl --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) ;;
+    cf)
+      raw_ver=$(cf version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) ;;
+    *)
+      raw_ver=$("$cmd" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) ;;
+  esac
+
+  if [[ -z "$raw_ver" ]]; then
+    # Cannot determine version — treat as OK (best effort)
+    return 0
+  fi
+
+  # Store version for display
+  printf -v "TOOL_VER_${cmd//-/_}" "%s" "$raw_ver"
+
+  if version_gte "$raw_ver" "$min_ver"; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+# install_tool <name> <brew_formula>
+install_tool() {
+  local name="$1" formula="$2"
+  log_info "Installing ${name}..."
+  if [[ "$formula" == "--cask docker" ]]; then
+    brew install --cask docker
+  else
+    brew install "$formula"
+  fi
+}
+
+# Get installed version of a command (best effort)
+get_tool_version() {
+  local cmd="$1"
+  local raw_ver=""
+  case "$cmd" in
+    helm)
+      raw_ver=$(helm version --short 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) ;;
+    kubectl)
+      raw_ver=$(kubectl version --client -o json 2>/dev/null | jq -r '.clientVersion.gitVersion' 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) ;;
+    limactl)
+      raw_ver=$(limactl --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) ;;
+    cf)
+      raw_ver=$(cf version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) ;;
+    docker)
+      raw_ver=$(docker --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) ;;
+    go)
+      raw_ver=$(go version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) ;;
+    *)
+      raw_ver=$("$cmd" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) ;;
+  esac
+  printf "%s" "$raw_ver"
+}
+
 # --- Prerequisite checks -----------------------------------------------------
 
 check_macos_version() {
@@ -143,6 +232,187 @@ check_free_disk() {
   fi
 }
 
+# --- Host tools check --------------------------------------------------------
+
+check_host_tools() {
+  # Required tools: name | command | brew formula | min version (empty = any)
+  # Format: "name:cmd:formula:minver"
+  local required_tools=(
+    "Homebrew:brew:__homebrew__:"
+    "Docker Desktop:docker:--cask docker:"
+    "Lima:limactl:lima:1.0"
+    "kubectl:kubectl:kubectl:1.28"
+    "Helm:helm:helm:3.12"
+    "jq:jq:jq:"
+    "envsubst:envsubst:gettext:"
+    "skopeo:skopeo:skopeo:"
+    "crane:crane:crane:"
+    "CF CLI:cf:cloudfoundry/tap/cf-cli@8:8"
+  )
+
+  local optional_tools=(
+    "Go:go:go:"
+    "ArgoCD CLI:argocd:argocd:"
+    "Velero CLI:velero:velero:"
+    "k9s:k9s:k9s:"
+  )
+
+  printf "${BOLD}${CYAN}  Required Tools${NC}\n"
+  printf "  %-22s %-12s %s\n" "Tool" "Status" "Version"
+  printf "  %s\n" "──────────────────────────────────────────────"
+
+  local missing_required=()
+  local docker_was_missing=false
+
+  for entry in "${required_tools[@]}"; do
+    local name cmd formula minver
+    IFS=: read -r name cmd formula minver <<< "$entry"
+
+    local status_text version_str color
+    if command -v "$cmd" &>/dev/null; then
+      version_str=$(get_tool_version "$cmd")
+      if [[ -n "$minver" && -n "$version_str" ]]; then
+        if version_gte "$version_str" "$minver"; then
+          status_text="installed"
+          color="$GREEN"
+        else
+          status_text="outdated"
+          color="$RED"
+          missing_required+=("$name:$cmd:$formula:$minver")
+        fi
+      else
+        status_text="installed"
+        color="$GREEN"
+        [[ -z "$version_str" ]] && version_str="-"
+      fi
+    else
+      status_text="missing"
+      color="$RED"
+      version_str="-"
+      missing_required+=("$name:$cmd:$formula:$minver")
+      [[ "$cmd" == "docker" ]] && docker_was_missing=true
+    fi
+
+    printf "  %-22s ${color}%-12s${NC} %s\n" "$name" "$status_text" "${version_str:-−}"
+  done
+
+  printf "\n"
+  printf "${BOLD}${CYAN}  Optional Tools${NC}\n"
+  printf "  %-22s %-12s %s\n" "Tool" "Status" "Version"
+  printf "  %s\n" "──────────────────────────────────────────────"
+
+  local missing_optional=()
+
+  for entry in "${optional_tools[@]}"; do
+    local name cmd formula minver
+    IFS=: read -r name cmd formula minver <<< "$entry"
+
+    local status_text version_str color
+    if command -v "$cmd" &>/dev/null; then
+      version_str=$(get_tool_version "$cmd")
+      status_text="installed"
+      color="$GREEN"
+      [[ -z "$version_str" ]] && version_str="-"
+    else
+      status_text="missing"
+      color="$YELLOW"
+      version_str="-"
+      missing_optional+=("$name:$cmd:$formula:$minver")
+    fi
+
+    printf "  %-22s ${color}%-12s${NC} %s\n" "$name" "$status_text" "${version_str:-−}"
+  done
+
+  printf "\n"
+
+  # --- Homebrew special handling ---
+  local brew_missing=false
+  for entry in "${missing_required[@]+"${missing_required[@]}"}"; do
+    local name cmd
+    IFS=: read -r name cmd _ _ <<< "$entry"
+    if [[ "$cmd" == "brew" ]]; then
+      brew_missing=true
+      break
+    fi
+  done
+
+  if $brew_missing; then
+    log_warn "Homebrew is not installed. It is required to install all other tools."
+    local ans
+    read -rp "  Install Homebrew now? (requires sudo) [Y/n] " ans
+    ans="${ans:-Y}"
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+      log_info "Installing Homebrew..."
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      log_success "Homebrew installed."
+      # Re-run tool check after brew is available
+      printf "\n"
+      log_info "Re-checking tools now that Homebrew is available..."
+      check_host_tools
+      return
+    else
+      log_error "Homebrew is required. Cannot continue without it."
+      exit 1
+    fi
+  fi
+
+  # --- Required tools install prompt ---
+  local num_missing="${#missing_required[@]}"
+  if [[ "$num_missing" -gt 0 ]]; then
+    local ans
+    read -rp "  ${BOLD}${num_missing} required tool(s) missing. Install automatically?${NC} [Y/n] " ans
+    ans="${ans:-Y}"
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+      local docker_installed=false
+      for entry in "${missing_required[@]+"${missing_required[@]}"}"; do
+        local name cmd formula minver
+        IFS=: read -r name cmd formula minver <<< "$entry"
+        [[ "$cmd" == "brew" ]] && continue  # already handled above
+        install_tool "$name" "$formula"
+        log_success "$name installed."
+        [[ "$cmd" == "docker" ]] && docker_installed=true
+      done
+      if $docker_installed; then
+        printf "\n"
+        log_warn "Docker Desktop was just installed."
+        read -rp "  Please start Docker Desktop, then press Enter to continue..." _
+      fi
+    else
+      printf "\n"
+      log_error "The stack cannot be installed without required tools."
+      exit 1
+    fi
+  fi
+
+  # --- Optional tools install prompt ---
+  local num_opt_missing="${#missing_optional[@]}"
+  if [[ "$num_opt_missing" -gt 0 ]]; then
+    local opt_names=()
+    for entry in "${missing_optional[@]+"${missing_optional[@]}"}"; do
+      local name
+      IFS=: read -r name _ _ _ <<< "$entry"
+      opt_names+=("$name")
+    done
+    local opt_list
+    opt_list=$(IFS=", "; echo "${opt_names[*]+"${opt_names[*]}"}")
+    local ans
+    read -rp "  Install optional tools? (${opt_list}) [y/N] " ans
+    ans="${ans:-N}"
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+      for entry in "${missing_optional[@]+"${missing_optional[@]}"}"; do
+        local name cmd formula minver
+        IFS=: read -r name cmd formula minver <<< "$entry"
+        install_tool "$name" "$formula"
+        log_success "$name installed."
+      done
+    fi
+  fi
+
+  printf "\n"
+  log_success "Host tools check complete."
+  printf "\n"
+}
+
 # --- Main --------------------------------------------------------------------
 
 main() {
@@ -170,6 +440,14 @@ main() {
 
   log_success "All system checks passed."
   printf "\n"
+
+  # --- Host Tools ---
+  printf "${BOLD}${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+  printf "${BOLD}  Host Tools${NC}\n"
+  printf "${BOLD}${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+  printf "\n"
+
+  check_host_tools
 }
 
 main "$@"
