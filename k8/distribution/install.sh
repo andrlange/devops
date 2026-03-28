@@ -40,7 +40,7 @@ fi
 # write_credentials — Generate/update credentials.md with current secrets
 # =============================================================================
 write_credentials() {
-    local cred_file="${SCRIPT_DIR}/../../credentials.md"
+    local cred_file="${K8_DIR}/../credentials.md"
     local domain="${PLATFORM_DOMAIN:-unknown}"
 
     cat > "$cred_file" <<'CRED_HEADER'
