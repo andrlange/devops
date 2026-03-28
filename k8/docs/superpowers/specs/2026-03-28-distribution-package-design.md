@@ -350,6 +350,29 @@ Multiple stack instances can coexist on the same Mac (e.g., production domain + 
 1. Same auto-detection as `stop` — find the running `k3s-*` VM
 2. If none running: list all available VMs with their status
 
+**`stack.sh deletestack`:**
+1. List all Lima VMs matching `k3s-*` with status and domain
+2. If none found: "No stacks found."
+3. Present selection:
+   ```
+   Available stacks:
+     1) k3s-server    (Stopped)  - development.cfapps.cool
+     2) k3s-test      (Running)  - development.example.com
+   Select stack to delete [none]:
+   ```
+4. If selected VM is running: stop it first
+5. Safety confirmation:
+   ```
+   WARNING: This will permanently delete Lima VM 'k3s-test'
+   and all data inside it (K3s cluster, volumes, secrets).
+   This action cannot be undone.
+
+   Type 'k3s-test' to confirm deletion:
+   ```
+   (Must type the exact VM name — not just "yes")
+6. Execute `limactl delete k3s-test`
+7. Clean up associated kubeconfig context: `kubectl config delete-context k3s-k3s-test`
+
 ### Testing Workflow
 
 ```bash
