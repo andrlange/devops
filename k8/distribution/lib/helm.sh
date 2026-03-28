@@ -22,7 +22,7 @@ helm_install_if_needed() {
   helm_dependency_build "$chart_path"
 
   log_info "Installing Helm release '$release' in '$namespace'..."
-  if helm install "$release" "$chart_path" -n "$namespace" "${extra_args[@]}" 2>&1; then
+  if helm install "$release" "$chart_path" -n "$namespace" ${extra_args[@]+"${extra_args[@]}"} 2>&1; then
     log_success "Helm release '$release' installed"
   else
     log_error "Failed to install Helm release '$release'"
@@ -42,7 +42,7 @@ helm_upgrade() {
   helm_dependency_build "$chart_path"
 
   log_info "Upgrading Helm release '$release' in '$namespace'..."
-  if helm upgrade --install "$release" "$chart_path" -n "$namespace" "${extra_args[@]}" 2>&1; then
+  if helm upgrade --install "$release" "$chart_path" -n "$namespace" ${extra_args[@]+"${extra_args[@]}"} 2>&1; then
     log_success "Helm release '$release' upgraded"
   else
     log_error "Failed to upgrade Helm release '$release'"
