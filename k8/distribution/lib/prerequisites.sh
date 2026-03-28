@@ -231,7 +231,12 @@ mark_phase_complete() {
 PHASE_${phase}_COMPLETE=true
 PHASE_${phase}_TIMESTAMP=${timestamp}
 EOF
-  log_debug "Marked phase $phase complete at $timestamp"
+
+  # Stop phase timer and print timing summary
+  if declare -p PHASE_START_TIME &>/dev/null 2>&1; then
+    phase_timer_stop "$phase"
+    print_phase_timing
+  fi
 }
 
 # Mark a component as installed within a phase

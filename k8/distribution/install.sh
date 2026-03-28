@@ -100,6 +100,37 @@ PHASE1
 }
 
 # =============================================================================
+# Phase timing — track duration per phase and print summary
+# =============================================================================
+declare -A PHASE_START_TIME PHASE_DURATION
+
+phase_timer_start() {
+  PHASE_START_TIME[$1]=$(date +%s)
+}
+
+phase_timer_stop() {
+  local phase="$1"
+  local start="${PHASE_START_TIME[$phase]:-$(date +%s)}"
+  local end=$(date +%s)
+  local elapsed=$((end - start))
+  local mins=$((elapsed / 60))
+  local secs=$((elapsed % 60))
+  PHASE_DURATION[$phase]="${mins}m ${secs}s"
+}
+
+print_phase_timing() {
+  echo ""
+  log_info "────────────────────────────────────"
+  log_info "  Phase Timing"
+  log_info "────────────────────────────────────"
+  for phase in $(echo "${!PHASE_DURATION[@]}" | tr ' ' '\n' | sort -n); do
+    printf "  ${BOLD}Phase %s${NC}  %s\n" "$phase" "${PHASE_DURATION[$phase]}"
+  done
+  log_info "────────────────────────────────────"
+  echo ""
+}
+
+# =============================================================================
 # get_metallb_ips — Derive platform and apps IPs from METALLB_IP_RANGE
 # =============================================================================
 get_metallb_platform_ip() {
@@ -455,6 +486,7 @@ load_config() {
 # Lima VM, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager
 # =============================================================================
 install_phase_1() {
+  phase_timer_start 1
   log_phase "Phase 1 — Foundation"
   load_config
   check_phase_prerequisites 1 "$STATE_FILE"
@@ -976,6 +1008,7 @@ POLICY' >/dev/null 2>&1 || true
 # ArgoCD, Portainer, Garage, Technitium, Velero
 # =============================================================================
 install_phase_2() {
+  phase_timer_start 2
   log_phase "Phase 2 — Platform"
   load_config
   check_phase_prerequisites 2 "$STATE_FILE"
@@ -1222,6 +1255,7 @@ install_phase_2() {
 # Loki, Mimir, Tempo, Alloy, kube-state-metrics, node-exporter, Grafana
 # =============================================================================
 install_phase_3() {
+  phase_timer_start 3
   log_phase "Phase 3 — Monitoring"
   load_config
   check_phase_prerequisites 3 "$STATE_FILE"
@@ -1372,6 +1406,7 @@ install_phase_3() {
 # artifact-keeper (Backend + Web + Trivy), PostgreSQL, Meilisearch
 # =============================================================================
 install_phase_4() {
+  phase_timer_start 4
   log_phase "Phase 4 — Services (artifact-keeper)"
   load_config
   check_phase_prerequisites 4 "$STATE_FILE"
@@ -1460,6 +1495,7 @@ install_phase_4() {
 # Phase 5 — GitLab CE + Runner
 # =============================================================================
 install_phase_5() {
+  phase_timer_start 5
   log_phase "Phase 5 — GitLab CE + Runner"
   load_config
   check_phase_prerequisites 5 "$STATE_FILE"
@@ -1602,6 +1638,7 @@ install_phase_5() {
 # Gateway API, Contour, kpack, Service Binding, Korifi
 # =============================================================================
 install_phase_6() {
+  phase_timer_start 6
   log_phase "Phase 6 — Cloud Foundry (Korifi) [OPTIONAL]"
   load_config
   # Phase 6 only requires Phase 1-3, not 4-5
@@ -2141,6 +2178,7 @@ CRBEOF
 # CloudNativePG, RabbitMQ Operator, Universal OSBAPI Broker
 # =============================================================================
 install_phase_7() {
+  phase_timer_start 7
   log_phase "Phase 7 — CF Service Brokers"
   load_config
   export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
@@ -2317,6 +2355,7 @@ install_phase_7() {
 # Spring Boot app deployed via cf push with auto-configured Korifi integration
 # =============================================================================
 install_phase_8() {
+  phase_timer_start 8
   log_phase "Phase 8 — kappman (Korifi App Manager)"
   if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
@@ -2756,7 +2795,6 @@ cmd_full_setup() {
 
   echo ""
   log_info "Starting full installation (Phase 1-7)..."
-  log_info "Phases 1-5 are required, Phases 6-7 are optional."
   echo ""
 
   install_phase_1
@@ -2764,18 +2802,12 @@ cmd_full_setup() {
   install_phase_3
   install_phase_4
   install_phase_5
-
-  echo ""
-  if ask_yes_no "Install Phase 6 (Cloud Foundry / Korifi)? [optional]" "n"; then
-    install_phase_6
-  fi
-
-  if ask_yes_no "Install Phase 7 (Service Brokers)? [optional, requires Go]" "n"; then
-    install_phase_7
-  fi
+  install_phase_6
+  install_phase_7
 
   echo ""
   log_success "Installation complete!"
+  print_phase_timing
   cmd_status
 }
 
