@@ -223,23 +223,19 @@ cmd_zero() {
   done
 
   # -------------------------------------------------------------------------
-  # 2. Network Settings
+  # 2. Network Settings (auto-detected — vzNAT always uses 192.168.64.0/24)
   # -------------------------------------------------------------------------
   print_section "2. Network Settings"
   echo ""
 
-  log_info "Network settings will be auto-detected from vzNAT after VM creation."
-  log_info "These defaults are used as fallback only."
+  log_info "Network is auto-configured by macOS Virtualization.framework (vzNAT)."
+  log_info "Subnet: 192.168.64.0/24 (fixed, not configurable)"
+  log_info "MetalLB IP range: 192.168.64.200-192.168.64.210"
   echo ""
 
-  local cfg_network_subnet
-  cfg_network_subnet=$(ask "Network subnet" "${NETWORK_SUBNET:-192.168.64.0/24}")
-
-  local cfg_network_gateway
-  cfg_network_gateway=$(ask "Network gateway" "${NETWORK_GATEWAY:-192.168.64.1}")
-
-  local cfg_metallb_range
-  cfg_metallb_range=$(ask "MetalLB IP range" "${METALLB_IP_RANGE:-192.168.64.200-192.168.64.210}")
+  local cfg_network_subnet="192.168.64.0/24"
+  local cfg_network_gateway="192.168.64.1"
+  local cfg_metallb_range="192.168.64.200-192.168.64.210"
 
   # -------------------------------------------------------------------------
   # 3. Domain Settings
