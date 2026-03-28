@@ -525,6 +525,17 @@ REGEOF
 
     if [[ "$is_initialized" == "True" ]]; then
       log_info "OpenBao already initialized"
+      # Need root token for bootstrap — check if we have it from config or ask
+      if [[ -z "${OPENBAO_ROOT_TOKEN:-}" ]]; then
+        log_warn "Root token not available (OpenBao was initialized in a prior run)."
+        printf "  ${BOLD}OpenBao Root Token${NC}: " >&2
+        read -rs OPENBAO_ROOT_TOKEN </dev/tty
+        echo "" >&2
+        if [[ -z "$OPENBAO_ROOT_TOKEN" ]]; then
+          log_error "Root token is required for bootstrapping secrets."
+          exit 1
+        fi
+      fi
     else
       # Initialize with 5 key shares, 3 key threshold
       local init_output
