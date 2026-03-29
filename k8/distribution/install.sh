@@ -1792,8 +1792,11 @@ install_phase_6() {
   # --- Install Gateway API CRDs ---
   if ! component_is_installed "phase6_gateway_api" "$STATE_FILE"; then
     log_step "Installing Gateway API CRDs..."
-    # Use experimental install (includes TLSRoute required by Korifi)
-    kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/experimental-install.yaml 2>&1 | tail -3
+    # Delete backendtlspolicies CRD if it conflicts (K3s bundles v1, experimental needs v1alpha3)
+    kubectl delete crd backendtlspolicies.gateway.networking.k8s.io 2>/dev/null || true
+    # Use experimental install (includes TLSRoute required by Korifi) with server-side apply
+    kubectl apply --server-side --force-conflicts \
+      -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/experimental-install.yaml 2>&1 | tail -3
     log_success "Gateway API CRDs installed"
     mark_component_installed "phase6_gateway_api" "$STATE_FILE"
   fi
