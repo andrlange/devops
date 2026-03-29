@@ -2732,16 +2732,20 @@ for ns in sorted(namespaces):
       cf create-service postgresql small kappman-db 2>&1 | tail -1
 
       log_step "Waiting for kappman-db service to be ready..."
+      # Use kubectl to check CF service instance status (cf service fails on Korifi)
+      kubectl config use-context "k3s-${LIMA_VM_NAME}" 2>/dev/null || true
       local retries=0
       while [[ $retries -lt 60 ]]; do
-        local svc_status
-        svc_status=$(cf service kappman-db 2>/dev/null | grep "status:" | awk '{print $NF}' || echo "pending")
-        if [[ "$svc_status" == "succeeded" ]]; then
+        local svc_ready
+        svc_ready=$(kubectl get cfserviceinstances -A -o json 2>/dev/null \
+          | jq -r '.items[] | select(.status.conditions[]? | select(.type=="Ready" and .status=="True")) | .metadata.name' 2>/dev/null | head -1 || echo "")
+        if [[ -n "$svc_ready" ]]; then
           break
         fi
         retries=$((retries + 1))
         sleep 5
       done
+      kubectl config use-context cf-admin 2>/dev/null || true
     else
       log_info "Service 'kappman-db' already exists"
     fi
