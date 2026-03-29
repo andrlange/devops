@@ -175,6 +175,7 @@ Large components like ArgoCD, GitLab CE, and Grafana may take 2-5 minutes to bec
 | No LoadBalancer IP assigned | MetalLB L2 requires vzNAT networking. Verify the Lima VM type: `limactl info | jq '.vmType'` should return `"vz"`. |
 | `kubectl` connection refused | Wrong kubeconfig context. Run `./k8/stack.sh context` to verify, or `./k8/stack.sh start` to re-export the kubeconfig. |
 | Installation interrupted | Re-run `./install.sh phase <N>` to resume from where it stopped. Completed components are tracked and skipped automatically. |
+| Portainer shows "timed out" | Portainer locks itself if you don't create an admin account within 5 minutes of installation. Restart the pod: `kubectl rollout restart deployment portainer -n portainer`, then immediately open the Portainer URL and set your admin password. |
 
 ---
 
