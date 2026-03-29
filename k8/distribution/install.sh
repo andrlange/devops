@@ -254,7 +254,7 @@ substitute_domains() {
   log_success "Domains substituted in ${count} files"
 
   # Also patch any already-deployed IngressRoutes in the cluster that still have old domains
-  if kubectl get ingressroute -A &>/dev/null; then
+  if kubectl get ingressroute -A --request-timeout=5s &>/dev/null; then
     local stale_routes
     stale_routes=$(kubectl get ingressroute -A -o json 2>/dev/null \
       | jq -r '.items[] | select(.spec.routes[].match | contains("cfapps.cool")) | "\(.metadata.namespace)/\(.metadata.name)"' 2>/dev/null || echo "")
