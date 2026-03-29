@@ -1136,6 +1136,10 @@ install_phase_2() {
 
     if [[ -d "${K8_DIR}/platform/argocd" ]]; then
       helm_install_if_needed "argocd" "${K8_DIR}/platform/argocd" "argocd"
+      # Apply IngressRoute (not included in Helm chart)
+      if [[ -f "${K8_DIR}/platform/argocd/ingressroute.yaml" ]]; then
+        kubectl apply -f "${K8_DIR}/platform/argocd/ingressroute.yaml" 2>/dev/null || true
+      fi
       wait_for_pods "argocd" 180
       log_success "ArgoCD installed"
     else
