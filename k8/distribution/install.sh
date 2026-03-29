@@ -1502,6 +1502,9 @@ install_phase_3() {
     ensure_namespace "monitoring"
 
     if [[ -d "${K8_DIR}/monitoring/grafana" ]]; then
+      # Create dashboard configmaps if they don't exist (normally provided by kube-state-metrics)
+      kubectl create configmap grafana-dashboards-kubernetes -n monitoring 2>/dev/null || true
+
       local grafana_args=()
       if [[ -n "${GRAFANA_ADMIN_PASSWORD:-}" ]]; then
         grafana_args+=(--set "grafana.adminPassword=${GRAFANA_ADMIN_PASSWORD}")
