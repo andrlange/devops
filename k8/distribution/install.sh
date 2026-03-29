@@ -749,10 +749,7 @@ REGEOF
     ensure_namespace "openbao"
     helm_install_if_needed "openbao" "${K8_DIR}/services/openbao" "openbao"
 
-    # Apply IngressRoute for OpenBao UI
-    if [[ -f "${K8_DIR}/services/openbao/ingressroute.yaml" ]]; then
-      kubectl apply -f "${K8_DIR}/services/openbao/ingressroute.yaml" 2>/dev/null || true
-    fi
+    # Note: OpenBao IngressRoute is applied after Traefik (Step 1.6) when the CRD exists
 
     log_info "Waiting for OpenBao pod to be Running..."
     wait_for_pod_running "openbao" "app.kubernetes.io/name=openbao" 120
@@ -1069,6 +1066,13 @@ POLICY' >/dev/null 2>&1 || true
   else
     log_info "Traefik already installed, skipping"
   fi
+
+  # Apply IngressRoutes that depend on Traefik CRDs (idempotent, always runs)
+  for ir in "${K8_DIR}/services/openbao/ingressroute.yaml"; do
+    if [[ -f "$ir" ]]; then
+      kubectl apply -f "$ir" 2>/dev/null || true
+    fi
+  done
 
   # --- 1.7 cert-manager ---
   if ! component_is_installed "CERTMANAGER" "$STATE_FILE"; then
