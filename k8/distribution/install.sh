@@ -96,6 +96,7 @@ Apps Domain: ${apps_domain}
 | Garage Admin Secret | \`${garage_sk:-not yet set}\` |
 | S3 Endpoint | http://garage.garage.svc:3900 (in-cluster) |
 | S3 Region | garage |
+| S3 Manager | https://s3-manager.${domain} |
 
 ## Backup — Velero
 
@@ -1256,7 +1257,7 @@ install_phase_2() {
             access_key="$ak" secret_key="$sk" >/dev/null 2>&1 || true
           log_success "Garage S3 key '${svc_name}' created and stored in OpenBao"
 
-          # Create bucket (skip for admin key)
+          # Create bucket and grant access (skip bucket creation for admin key)
           if [[ "$svc_name" != "admin" ]]; then
             curl -sf -X POST -H "Authorization: Bearer ${garage_admin_token}" \
               -H "Content-Type: application/json" \
@@ -1277,6 +1278,24 @@ install_phase_2() {
         fi
       fi
     done
+
+    # Grant admin key access to ALL buckets (for S3 Manager UI)
+    local admin_ak
+    admin_ak=$($BAO bao kv get "-field=access_key" secret/garage/admin 2>/dev/null || echo "")
+    if [[ -n "$admin_ak" ]]; then
+      for bkt in loki mimir tempo velero artifacts; do
+        local bid
+        bid=$(curl -s -H "Authorization: Bearer ${garage_admin_token}" \
+          "${garage_api}/v2/GetBucketInfo?globalAlias=${bkt}" 2>/dev/null | jq -r '.id // empty' 2>/dev/null || echo "")
+        if [[ -n "$bid" ]]; then
+          curl -s -X POST -H "Authorization: Bearer ${garage_admin_token}" \
+            -H "Content-Type: application/json" \
+            -d "{\"bucketId\":\"${bid}\",\"accessKeyId\":\"${admin_ak}\",\"permissions\":{\"read\":true,\"write\":true,\"owner\":true}}" \
+            "${garage_api}/v2/AllowBucketKey" >/dev/null 2>&1 || true
+        fi
+      done
+      log_success "Admin key granted access to all buckets"
+    fi
 
     # Stop port-forward
     kill $pf_pid 2>/dev/null || true
@@ -1309,6 +1328,13 @@ install_phase_2() {
         fi
       fi
     done
+
+    # Deploy S3 Manager (Web UI for Garage)
+    if [[ -d "${K8_DIR}/platform/garage/s3-manager" ]]; then
+      kubectl apply -k "${K8_DIR}/platform/garage/s3-manager" 2>&1 | tail -3
+      wait_for_pods "garage" 120
+      log_success "S3 Manager installed"
+    fi
 
     log_success "Garage installed and bootstrapped"
     mark_component_installed "GARAGE" "$STATE_FILE"
