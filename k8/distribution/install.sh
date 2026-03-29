@@ -196,6 +196,21 @@ print_phase_timing() {
 }
 
 # =============================================================================
+# ensure_openbao_login — Login to OpenBao using root token from credentials or env
+# =============================================================================
+ensure_openbao_login() {
+  if [[ -z "${OPENBAO_ROOT_TOKEN:-}" ]]; then
+    local cred_md="${K8_DIR}/../openbao_credentials.md"
+    if [[ -f "$cred_md" ]]; then
+      OPENBAO_ROOT_TOKEN=$(sed -n '/## Root Token/{n;n;s/`//g;p;}' "$cred_md")
+    fi
+  fi
+  if [[ -n "${OPENBAO_ROOT_TOKEN:-}" ]]; then
+    kubectl exec -n openbao openbao-0 -- bao login "${OPENBAO_ROOT_TOKEN}" >/dev/null 2>&1 || true
+  fi
+}
+
+# =============================================================================
 # get_metallb_ips — Derive platform and apps IPs from METALLB_IP_RANGE
 # =============================================================================
 get_metallb_platform_ip() {
@@ -1626,13 +1641,7 @@ install_phase_4() {
   check_phase_prerequisites 4 "$STATE_FILE"
   export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
 
-  # Ensure OpenBao is logged in
-  if [[ -z "${OPENBAO_ROOT_TOKEN:-}" ]]; then
-    printf "  ${BOLD}OpenBao Root Token${NC}: " >&2
-    read -rs OPENBAO_ROOT_TOKEN </dev/tty
-    echo "" >&2
-  fi
-  kubectl exec -n openbao openbao-0 -- bao login "${OPENBAO_ROOT_TOKEN}" >/dev/null 2>&1 || true
+  ensure_openbao_login
 
   # --- Verify Garage artifacts key exists in OpenBao ---
   if ! component_is_installed "phase4_garage_key" "$STATE_FILE"; then
@@ -1719,13 +1728,7 @@ install_phase_5() {
   check_phase_prerequisites 5 "$STATE_FILE"
   export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
 
-  # Ensure OpenBao is logged in
-  if [[ -z "${OPENBAO_ROOT_TOKEN:-}" ]]; then
-    printf "  ${BOLD}OpenBao Root Token${NC}: " >&2
-    read -rs OPENBAO_ROOT_TOKEN </dev/tty
-    echo "" >&2
-  fi
-  kubectl exec -n openbao openbao-0 -- bao login "${OPENBAO_ROOT_TOKEN}" >/dev/null 2>&1 || true
+  ensure_openbao_login
 
   local GITLAB_DOMAIN="${PLATFORM_DOMAIN:-development.cfapps.cool}"
 
@@ -2442,6 +2445,7 @@ install_phase_7() {
   log_phase "Phase 7 — CF Service Brokers"
   load_config
   export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
+  ensure_openbao_login
 
   # --- Install CloudNativePG operator ---
   if ! component_is_installed "phase7_cnpg" "$STATE_FILE"; then
