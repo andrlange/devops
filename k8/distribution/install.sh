@@ -2176,50 +2176,16 @@ json.dump(cb, sys.stdout)
 
   # --- Patch Contour Gateway API config ---
   if ! component_is_installed "phase6_contour_gateway" "$STATE_FILE"; then
-    log_step "Patching Contour ConfigMap for Gateway API..."
+    log_step "Verifying Contour Gateway API configuration..."
 
-    # Enable BackendTLSPolicy v1alpha3 (required by Contour v1.33.x)
-    local btlsp_served
-    btlsp_served=$(kubectl get crd backendtlspolicies.gateway.networking.k8s.io -o json 2>/dev/null | \
-      python3 -c "import json,sys; crd=json.load(sys.stdin); print(next((str(v.get('served')) for v in crd['spec']['versions'] if v['name']=='v1alpha3'),'missing'))" 2>/dev/null || echo "missing")
-    if [ "$btlsp_served" = "False" ]; then
-      kubectl get crd backendtlspolicies.gateway.networking.k8s.io -o json | \
-        python3 -c "
-import json, sys
-crd = json.load(sys.stdin)
-for v in crd['spec']['versions']:
-    if v['name'] == 'v1alpha3':
-        v['served'] = True
-json.dump(crd, sys.stdout)
-" | kubectl apply -f - 2>&1 | tail -1
-      log_success "BackendTLSPolicy v1alpha3 enabled"
-    fi
-
-    # Patch Contour ConfigMap to reference korifi gateway
-    kubectl get configmap contour -n projectcontour -o json | \
-      python3 -c "
-import json, sys
-cm = json.load(sys.stdin)
-old = cm['data']['contour.yaml']
-new = old.replace(
-    '# Specify the Gateway API configuration.\n# gateway:\n#   namespace: projectcontour\n#   name: contour',
-    'gateway:\n  gatewayRef:\n    namespace: korifi-gateway\n    name: korifi'
-)
-cm['data']['contour.yaml'] = new
-json.dump(cm, sys.stdout)
-" | kubectl apply -f - 2>&1 | tail -1
-
-    # Restart Contour to apply changes
-    kubectl rollout restart deploy/contour -n projectcontour 2>&1 | tail -1
-    kubectl rollout status deploy/contour -n projectcontour --timeout=120s 2>&1 | tail -1
-
-    # Verify gateway is programmed
+    # With the official gateway provisioner, Contour is auto-configured via the Gateway object.
+    # Just verify the gateway is programmed.
     local gw_status
     gw_status=$(kubectl get gateway korifi -n korifi-gateway -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null || echo "Unknown")
     if [ "$gw_status" = "True" ]; then
       log_success "Contour Gateway API configured (PROGRAMMED=True)"
     else
-      log_warn "Gateway status: $gw_status — may need manual investigation"
+      log_warn "Korifi Gateway status: ${gw_status} — CF apps routing may not work until gateway is programmed"
     fi
     mark_component_installed "phase6_contour_gateway" "$STATE_FILE"
   fi
