@@ -217,7 +217,73 @@ kubectl rollout restart deployment/<name> -n <namespace>
 
 ---
 
-## 8. Running Multiple Stacks
+## 8. Cloud Foundry: Organizations, Spaces and kappman
+
+### Creating Orgs and Spaces
+
+```bash
+# Switch to CF admin context
+./k8/stack.sh switch
+
+# Login to CF API
+cf api https://api.<apps-domain> --skip-ssl-validation
+cf auth cf-admin
+
+# Create an org and space
+cf create-org my-org
+cf target -o my-org
+cf create-space dev
+cf target -o my-org -s dev
+
+# Deploy an app
+cf push my-app
+```
+
+### kappman (Korifi Apps Manager UI)
+
+kappman provides a web dashboard for managing Cloud Foundry orgs, spaces, apps, and services.
+
+- URL: `https://kappman.<apps-domain>`
+- Default login: `admin` / `change_me`
+
+**Visibility rule:** kappman can see all orgs and spaces that it has been granted access to via Kubernetes RoleBindings.
+
+- Orgs/spaces created **by kappman** in the UI are visible immediately
+- Orgs/spaces created **via cf CLI** require a RoleBinding refresh:
+
+```bash
+./k8/stack.sh refresh-kappman
+```
+
+This scans all CF-managed Kubernetes namespaces and ensures kappman has the required RoleBindings. Run it after creating orgs or spaces via the cf CLI.
+
+### Service Marketplace
+
+After Phase 7, the following services are available:
+
+```bash
+cf marketplace
+```
+
+| Service | Plans | Description |
+|---------|-------|-------------|
+| postgresql | small, medium | PostgreSQL 18 via CloudNativePG |
+| valkey | small | Valkey (Redis-compatible) key-value store |
+| rabbitmq | small | RabbitMQ message broker |
+| s3 | default | S3-compatible object storage (Garage) |
+
+```bash
+# Create a service
+cf create-service postgresql small my-db
+
+# Bind to an app
+cf bind-service my-app my-db
+cf restart my-app
+```
+
+---
+
+## 9. Running Multiple Stacks
 
 You can run multiple stack instances on the same Mac — for example, one for development and one for testing.
 
