@@ -1916,8 +1916,7 @@ install_phase_6() {
       "docker.io/envoyproxy/envoy:distroless-v1.35.9" 2>/dev/null || true
 
     # Install Contour full quickstart (Deployment + DaemonSet + ConfigMap)
-    # Filter out CRDs to avoid storedVersions conflict with K3s-bundled Gateway API
-    kubectl delete crd backendtlspolicies.gateway.networking.k8s.io 2>/dev/null || true
+    # backendtlspolicies CRD was already handled in the Gateway API CRDs step
     kubectl apply --server-side --force-conflicts \
       -f https://projectcontour.io/quickstart/contour.yaml 2>&1 | tail -5
 
