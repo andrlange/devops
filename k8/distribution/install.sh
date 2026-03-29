@@ -2095,20 +2095,58 @@ json.dump(d, sys.stdout)
     wait_for_pods "korifi" 180
     log_success "Korifi installed"
 
-    # Korifi creates its own Gateway object in korifi-gateway namespace.
-    # Contour (full quickstart) references it via ConfigMap gatewayRef.
-    # Just verify the gateway is created by Korifi Helm chart.
-    log_info "Waiting for Korifi Gateway to be created..."
-    local gw_attempts=0
-    while ! kubectl get gateway korifi -n korifi-gateway &>/dev/null; do
-      gw_attempts=$((gw_attempts + 1))
-      [[ $gw_attempts -ge 30 ]] && break
-      sleep 2
-    done
-    if kubectl get gateway korifi -n korifi-gateway &>/dev/null; then
-      log_success "Korifi Gateway created"
+    # Create the Korifi Gateway with dual TLS listeners:
+    # - TLS Passthrough for Korifi API (TLSRoute, hostname-filtered)
+    # - TLS Terminate for CF apps (HTTPRoutes, wildcard cert)
+    local CF_DOMAIN="${APPS_DOMAIN:-apps.yotta-cloud.net}"
+    log_info "Creating Korifi Gateway (TLS Passthrough + Terminate)..."
+    kubectl apply -f - <<KGWEOF
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: korifi
+  namespace: korifi-gateway
+spec:
+  gatewayClassName: contour
+  listeners:
+    - name: https-apps
+      protocol: HTTPS
+      port: 443
+      allowedRoutes:
+        namespaces:
+          from: All
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-apps-tls
+            namespace: korifi-gateway
+    - name: https-api
+      protocol: TLS
+      port: 443
+      hostname: "api.${CF_DOMAIN}"
+      allowedRoutes:
+        namespaces:
+          from: All
+        kinds:
+          - group: gateway.networking.k8s.io
+            kind: TLSRoute
+      tls:
+        mode: Passthrough
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+KGWEOF
+
+    sleep 10
+    local gw_status
+    gw_status=$(kubectl get gateway korifi -n korifi-gateway -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null || echo "Unknown")
+    if [[ "$gw_status" == "True" ]]; then
+      log_success "Korifi Gateway PROGRAMMED — routing active"
     else
-      log_warn "Korifi Gateway not found — CF routing may need manual setup"
+      log_warn "Korifi Gateway status: ${gw_status} — may need a few seconds"
     fi
     mark_component_installed "phase6_korifi" "$STATE_FILE"
   fi
