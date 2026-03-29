@@ -1058,6 +1058,11 @@ POLICY' >/dev/null 2>&1 || true
       apply_manifest "${K8_DIR}/infrastructure/cert-manager/wildcard-certificate.yaml"
     fi
 
+    # Also request apps wildcard cert (*.apps.<domain>) for Korifi/CF
+    if [[ -f "${K8_DIR}/infrastructure/cert-manager/wildcard-apps-certificate.yaml" ]]; then
+      apply_manifest "${K8_DIR}/infrastructure/cert-manager/wildcard-apps-certificate.yaml"
+    fi
+
     # Apply TLS store
     if [[ -f "${K8_DIR}/infrastructure/traefik/tls-store.yaml" ]]; then
       apply_manifest "${K8_DIR}/infrastructure/traefik/tls-store.yaml"
@@ -1094,8 +1099,20 @@ POLICY' >/dev/null 2>&1 || true
   write_credentials
   mark_phase_complete 1 "$STATE_FILE"
   log_success "Phase 1 — Foundation complete"
-  echo ""
-  log_info "Next step: ./install.sh phase 2"
+
+  # Offer to add KUBECONFIG to shell profile
+  local kubeconfig_line="export KUBECONFIG=\${HOME}/.kube/config-${LIMA_VM_NAME}"
+  local shell_rc="${HOME}/.zshrc"
+  if ! grep -q "config-${LIMA_VM_NAME}" "$shell_rc" 2>/dev/null; then
+    echo ""
+    if ask_yes_no "Add KUBECONFIG to ${shell_rc}?" "y"; then
+      echo "" >> "$shell_rc"
+      echo "# K8s DevOps Stack (${LIMA_VM_NAME})" >> "$shell_rc"
+      echo "${kubeconfig_line}" >> "$shell_rc"
+      log_success "Added to ${shell_rc}. Run 'source ${shell_rc}' to activate."
+    fi
+  fi
+
   echo ""
 }
 
@@ -1855,39 +1872,13 @@ GCEOF
       "${CONTOUR_REGISTRY}/envoyproxy/envoy:distroless-v1.35.9-arm64" \
       "docker.io/envoyproxy/envoy:distroless-v1.35.9" 2>/dev/null || true
 
-    # Create Gateway with MetalLB IP annotation for apps domain
-    kubectl apply -f - <<GWEOF
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
-metadata:
-  name: contour
-  namespace: projectcontour
-  annotations:
-    metallb.universe.tf/loadBalancerIPs: "${APPS_LB_IP}"
-spec:
-  gatewayClassName: contour
-  listeners:
-    - name: http
-      protocol: HTTP
-      port: 80
-      allowedRoutes:
-        namespaces:
-          from: All
-    - name: https
-      protocol: HTTPS
-      port: 443
-      allowedRoutes:
-        namespaces:
-          from: All
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - name: wildcard-apps-tls
-            namespace: traefik
-GWEOF
+    # Note: Do NOT create a Gateway here. Korifi creates its own Gateway
+    # in korifi-gateway namespace. We only need the GatewayClass + Provisioner.
+    # The Korifi Gateway will be configured after Korifi Helm install with
+    # TLS Passthrough (required for TLSRoute) and MetalLB IP annotation.
 
     wait_for_pods "projectcontour" 180
-    log_success "Contour installed on ${APPS_LB_IP}"
+    log_success "Contour Gateway Provisioner installed"
     mark_component_installed "phase6_contour" "$STATE_FILE"
   fi
 
@@ -2105,6 +2096,60 @@ json.dump(d, sys.stdout)
 
     wait_for_pods "korifi" 180
     log_success "Korifi installed"
+
+    # Configure the Korifi Gateway with TLS Passthrough (required for TLSRoute)
+    # and MetalLB IP annotation for the apps domain
+    log_info "Configuring Korifi Gateway with TLS Passthrough..."
+    local APPS_LB_IP="$(get_metallb_apps_ip)"
+    kubectl apply -f - <<KGWEOF
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: korifi
+  namespace: korifi-gateway
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: "${APPS_LB_IP}"
+spec:
+  gatewayClassName: contour
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: tls
+      protocol: TLS
+      port: 443
+      allowedRoutes:
+        namespaces:
+          from: All
+        kinds:
+          - group: gateway.networking.k8s.io
+            kind: TLSRoute
+      tls:
+        mode: Passthrough
+KGWEOF
+    sleep 10
+
+    # Create ReferenceGrant for TLS secret access across namespaces
+    kubectl apply -f - <<RGEOF
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-korifi-tls
+  namespace: traefik
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: korifi-gateway
+  to:
+    - group: ""
+      kind: Secret
+RGEOF
+
+    log_success "Korifi Gateway configured (TLS Passthrough on ${APPS_LB_IP})"
     mark_component_installed "phase6_korifi" "$STATE_FILE"
   fi
 
