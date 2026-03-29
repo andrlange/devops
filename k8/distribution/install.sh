@@ -242,7 +242,7 @@ substitute_domains() {
     if [[ "$changed" == "true" ]]; then
       count=$((count + 1))
     fi
-  done < <(find "${K8_DIR}" -type f \( -name "*.yaml" -o -name "*.yml" -o -name "*.toml" \) -print0)
+  done < <(find "${K8_DIR}" -type f \( -name "*.yaml" -o -name "*.yml" -o -name "*.toml" -o -name "*.kt" -o -name "*.sh" -o -name "*.properties" \) -print0)
 
   # Also update config.env
   sed -i '' \
