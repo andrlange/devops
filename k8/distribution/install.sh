@@ -2591,10 +2591,18 @@ install_phase_7() {
     kubectl config use-context cf-admin 2>/dev/null || true
     local CF_DOMAIN="${APPS_DOMAIN:-apps.cfapps.cool}"
     cf api "https://api.${CF_DOMAIN}" --skip-ssl-validation 2>&1 | tail -1
-    cf auth cf-admin 2>&1 | tail -1
+    if ! cf auth cf-admin 2>&1 | tail -1; then
+      log_warn "CF auth failed. Retrying after 15s..."
+      sleep 15
+      cf api "https://api.${CF_DOMAIN}" --skip-ssl-validation 2>&1 | tail -1
+      cf auth cf-admin 2>&1 | tail -1
+    fi
 
-    cf create-service-broker k8s-services admin "${BROKER_PASS}" \
-      http://cf-service-broker.cf-services.svc.cluster.local 2>&1 | tail -1
+    if ! cf create-service-broker k8s-services admin "${BROKER_PASS}" \
+      http://cf-service-broker.cf-services.svc.cluster.local 2>&1 | tail -1; then
+      log_warn "Broker registration failed. Register manually:"
+      log_info "  cf create-service-broker k8s-services admin <password> http://cf-service-broker.cf-services.svc.cluster.local"
+    fi
 
     cf enable-service-access postgresql 2>&1 | tail -1
     cf enable-service-access valkey 2>&1 | tail -1
@@ -3057,19 +3065,24 @@ continue_from_phase() {
     else return 0; fi
   fi
 
-  if phase_is_complete 5 "$STATE_FILE"; then
+  if [[ "$completed_phase" -lt 6 ]] && phase_is_complete 5 "$STATE_FILE"; then
     echo ""
     log_info "Phase 6 deploys: Korifi (Cloud Foundry on K8s) + kpack + Contour"
     if ask_yes_no "Continue with Phase 6 (Cloud Foundry)?" "y"; then
       install_phase_6
     fi
 
+  fi
+
+  if [[ "$completed_phase" -lt 7 ]] && phase_is_complete 6 "$STATE_FILE"; then
     echo ""
     log_info "Phase 7 deploys: OSBAPI Service Brokers (PostgreSQL, Valkey, RabbitMQ, S3)"
     if ask_yes_no "Continue with Phase 7 (Service Brokers)?" "y"; then
       install_phase_7
-    fi
+    else return 0; fi
+  fi
 
+  if [[ "$completed_phase" -lt 8 ]] && phase_is_complete 7 "$STATE_FILE"; then
     echo ""
     log_info "Phase 8 deploys: kappman (Korifi Apps Manager UI)"
     if ask_yes_no "Continue with Phase 8 (kappman)?" "y"; then
