@@ -45,6 +45,13 @@ write_credentials() {
     local apps_domain="${APPS_DOMAIN:-app.cfapps.cool}"
 
     # Ensure OpenBao is logged in for secret reads
+    if [[ -z "${OPENBAO_ROOT_TOKEN:-}" ]]; then
+      # Try reading from openbao_credentials.md
+      local cred_md="${K8_DIR}/../openbao_credentials.md"
+      if [[ -f "$cred_md" ]]; then
+        OPENBAO_ROOT_TOKEN=$(sed -n '/## Root Token/{n;n;s/`//g;p;}' "$cred_md")
+      fi
+    fi
     if [[ -n "${OPENBAO_ROOT_TOKEN:-}" ]]; then
       kubectl exec -n openbao openbao-0 -- bao login "${OPENBAO_ROOT_TOKEN}" >/dev/null 2>&1 || true
     fi
