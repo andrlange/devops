@@ -2620,6 +2620,9 @@ install_phase_8() {
   fi
 
   # --- Create kappman ServiceAccount with Korifi admin privileges ---
+  # Must run as cluster admin, not cf-admin
+  kubectl config use-context "k3s-${LIMA_VM_NAME}" 2>/dev/null || true
+
   if ! component_is_installed "phase8_sa" "$STATE_FILE"; then
     log_step "Creating kappman-cf-admin ServiceAccount..."
 
