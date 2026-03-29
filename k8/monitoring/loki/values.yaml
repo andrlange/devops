@@ -94,6 +94,9 @@ loki:
     lokiCanary:
       enabled: false
 
+  lokiCanary:
+    enabled: false
+
   sidecar:
     image:
       registry: artifactory.cfapps.cool

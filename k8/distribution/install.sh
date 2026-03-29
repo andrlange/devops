@@ -1326,23 +1326,24 @@ install_phase_2() {
       {"op":"add","path":"/spec/template/spec/containers/0/readinessProbe","value":{"tcpSocket":{"port":3903},"initialDelaySeconds":10,"periodSeconds":10,"failureThreshold":5}}
     ]' 2>/dev/null || true
 
-    # Patch monitoring values.yaml files with the actual S3 keys from OpenBao
-    log_info "Patching monitoring S3 credentials into Helm values..."
-    for svc in tempo loki; do
-      local svc_ak svc_sk
-      svc_ak=$(curl -s -H "Authorization: Bearer ${garage_admin_token}" \
-        "${garage_api}/v2/ListKeys" 2>/dev/null | jq -r ".[] | select(.name == \"${svc}\") | .accessKeyId" 2>/dev/null || echo "")
-      svc_sk=$(_bao_field secret_key "secret/garage/${svc}" 2>/dev/null || echo "")
-      if [[ -n "$svc_ak" ]] && [[ -n "$svc_sk" ]]; then
-        local vf="${K8_DIR}/monitoring/${svc}/values.yaml"
-        if [[ -f "$vf" ]]; then
-          sed -i '' \
-            -e "s/TEMPO_S3_ACCESS_KEY_PLACEHOLDER/${svc_ak}/g" \
-            -e "s/TEMPO_S3_SECRET_KEY_PLACEHOLDER/${svc_sk}/g" \
-            "$vf" 2>/dev/null || true
-        fi
+    # Patch Tempo values.yaml with actual S3 keys from OpenBao
+    # (Loki and Mimir use ExternalSecrets, Tempo uses inline values)
+    log_info "Patching Tempo S3 credentials into Helm values..."
+    local tempo_ak tempo_sk
+    tempo_ak=$(_bao_field access_key "secret/garage/tempo" 2>/dev/null || echo "")
+    tempo_sk=$(_bao_field secret_key "secret/garage/tempo" 2>/dev/null || echo "")
+    if [[ -n "$tempo_ak" ]] && [[ -n "$tempo_sk" ]]; then
+      local tempo_vf="${K8_DIR}/monitoring/tempo/values.yaml"
+      if [[ -f "$tempo_vf" ]]; then
+        sed -i '' \
+          -e "s/TEMPO_S3_ACCESS_KEY_PLACEHOLDER/${tempo_ak}/g" \
+          -e "s/TEMPO_S3_SECRET_KEY_PLACEHOLDER/${tempo_sk}/g" \
+          "$tempo_vf" 2>/dev/null || true
+        log_success "Tempo S3 credentials patched"
       fi
-    done
+    else
+      log_warn "Could not read Tempo S3 keys from OpenBao — Tempo may need manual fix"
+    fi
 
     # Deploy S3 Manager (Web UI for Garage)
     if [[ -d "${K8_DIR}/platform/garage/s3-manager" ]]; then
