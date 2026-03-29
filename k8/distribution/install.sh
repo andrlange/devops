@@ -1768,7 +1768,8 @@ install_phase_6() {
   # --- Install Gateway API CRDs ---
   if ! component_is_installed "phase6_gateway_api" "$STATE_FILE"; then
     log_step "Installing Gateway API CRDs..."
-    kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml 2>&1 | tail -3
+    # Use experimental install (includes TLSRoute required by Korifi)
+    kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/experimental-install.yaml 2>&1 | tail -3
     log_success "Gateway API CRDs installed"
     mark_component_installed "phase6_gateway_api" "$STATE_FILE"
   fi
