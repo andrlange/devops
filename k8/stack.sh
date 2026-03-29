@@ -1173,6 +1173,36 @@ cmd_context() {
 }
 
 # ---------------------------------------------------------------------------
+# Refresh kappman RoleBindings for all CF namespaces
+# ---------------------------------------------------------------------------
+cmd_refresh_kappman() {
+    header "Refreshing kappman-cf-admin RoleBindings"
+
+    if ! kubectl get serviceaccount kappman-cf-admin -n korifi &>/dev/null; then
+        warn "kappman-cf-admin ServiceAccount not found — is Phase 8 installed?"
+        return 1
+    fi
+
+    local count=0
+    for ns in $(kubectl get ns -l korifi.cloudfoundry.org/org-guid -o name 2>/dev/null | sed 's|namespace/||') \
+              $(kubectl get ns -l korifi.cloudfoundry.org/space-guid -o name 2>/dev/null | sed 's|namespace/||') \
+              cf; do
+        kubectl create rolebinding kappman-admin -n "$ns" \
+            --clusterrole=korifi-controllers-admin \
+            --serviceaccount=korifi:kappman-cf-admin 2>/dev/null && count=$((count + 1)) || true
+        kubectl create rolebinding kappman-org-user -n "$ns" \
+            --clusterrole=korifi-controllers-organization-user \
+            --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
+        kubectl create rolebinding kappman-space-dev -n "$ns" \
+            --clusterrole=korifi-controllers-space-developer \
+            --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
+    done
+
+    ok "RoleBindings refreshed (${count} new namespaces added)"
+    info "kappman can now see all orgs, spaces, and apps"
+}
+
+# ---------------------------------------------------------------------------
 # Switch (toggle between cf-admin and k3s-k3s-server)
 # ---------------------------------------------------------------------------
 cmd_switch() {
@@ -1210,8 +1240,9 @@ Commands:
   cleanpods    Delete completed kpack build pods
   cfnamespaces Show CF org/space to K8s namespace mapping
   context      Show current kubectl context
-  switch       Toggle kubectl context (cf-admin ↔ k3s-k3s-server)
-  deletestack  Stop and permanently delete a k3s-* Lima VM and its kubeconfig
+  switch           Toggle kubectl context (cf-admin ↔ k3s-k3s-server)
+  refresh-kappman  Update kappman RoleBindings for new CF orgs/spaces
+  deletestack      Stop and permanently delete a k3s-* Lima VM and its kubeconfig
 
 Options:
   --backup    (stop only) Run a Velero backup before stopping
@@ -1244,10 +1275,11 @@ main() {
         extenddisk) cmd_extenddisk "$@" ;;
         extendram)  cmd_extendram "$@" ;;
         cleanpods)    cmd_cleanpods ;;
-        cfnamespaces) cmd_cfnamespaces ;;
-        context)      cmd_context ;;
-        switch)       cmd_switch ;;
-        deletestack)  cmd_deletestack ;;
+        cfnamespaces)      cmd_cfnamespaces ;;
+        context)           cmd_context ;;
+        switch)            cmd_switch ;;
+        refresh-kappman)   cmd_refresh_kappman ;;
+        deletestack)       cmd_deletestack ;;
         -h|--help|help)
             usage ;;
         "")
