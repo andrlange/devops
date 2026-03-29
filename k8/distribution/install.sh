@@ -1593,10 +1593,10 @@ install_phase_4() {
   if ! component_is_installed "phase4_secrets" "$STATE_FILE"; then
     log_step "Storing artifact-keeper secrets in OpenBao..."
     kubectl exec -n openbao openbao-0 -- bao kv put secret/artifact-keeper/postgres \
-      username="artifact_keeper" password="$(openssl rand -base64 16)" database="artifact_keeper" &>/dev/null
+      username="artifact_keeper" password="$(openssl rand -hex 16)" database="artifact_keeper" &>/dev/null
     kubectl exec -n openbao openbao-0 -- bao kv put secret/artifact-keeper/meilisearch \
       master_key="$(openssl rand -hex 16)" &>/dev/null
-    local ak_admin_pass=$(openssl rand -base64 16)
+    local ak_admin_pass=$(openssl rand -hex 16)
     kubectl exec -n openbao openbao-0 -- bao kv put secret/artifact-keeper/app \
       jwt_secret="$(openssl rand -base64 32)" \
       admin_password="$ak_admin_pass" \
@@ -1648,7 +1648,7 @@ install_phase_5() {
   # --- Store GitLab root password ---
   if ! component_is_installed "phase5_secrets" "$STATE_FILE"; then
     log_step "Storing GitLab secrets in OpenBao..."
-    local gitlab_root_pass=$(openssl rand -base64 16)
+    local gitlab_root_pass=$(openssl rand -hex 16)
     kubectl exec -n openbao openbao-0 -- bao kv put secret/gitlab/admin \
       root_password="$gitlab_root_pass" &>/dev/null
     log_success "GitLab root password stored"
