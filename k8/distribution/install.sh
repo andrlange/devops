@@ -2985,8 +2985,8 @@ continue_from_phase() {
 
   if phase_is_complete 5 "$STATE_FILE"; then
     echo ""
-    log_info "Phase 6 deploys: Korifi (Cloud Foundry on K8s) + kpack + Contour [OPTIONAL]"
-    if ask_yes_no "Continue with Phase 6 (Cloud Foundry)?" "n"; then
+    log_info "Phase 6 deploys: Korifi (Cloud Foundry on K8s) + kpack + Contour"
+    if ask_yes_no "Continue with Phase 6 (Cloud Foundry)?" "y"; then
       install_phase_6
     fi
 
