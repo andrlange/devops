@@ -82,22 +82,30 @@ setup() {
 }
 
 # --- Wait for service to be ready ---
+# Uses kubectl to check CFServiceInstance status (cf service fails on Korifi)
 wait_for_service() {
   local svc_name="$1"
   local timeout="${2:-120}"
   local elapsed=0
 
+  # Switch to admin context for kubectl access
+  local prev_ctx
+  prev_ctx=$(kubectl config current-context 2>/dev/null)
+  kubectl config use-context "$(kubectl config get-contexts -o name 2>/dev/null | grep '^k3s-')" &>/dev/null || true
+
   while [[ $elapsed -lt $timeout ]]; do
-    local status
-    status=$(cf service "$svc_name" 2>/dev/null | grep "status:" | awk '{print $NF}' || echo "pending")
-    if [[ "$status" == "succeeded" ]]; then
+    local ready
+    ready=$(kubectl get cfserviceinstances -A -o json 2>/dev/null \
+      | jq -r ".items[] | select(.spec.displayName == \"${svc_name}\") | .status.conditions[] | select(.type == \"Ready\") | .status" 2>/dev/null || echo "")
+    if [[ "$ready" == "True" ]]; then
+      kubectl config use-context "$prev_ctx" &>/dev/null || true
       return 0
-    elif [[ "$status" == "failed" ]]; then
-      return 1
     fi
     sleep 5
     elapsed=$((elapsed + 5))
   done
+
+  kubectl config use-context "$prev_ctx" &>/dev/null || true
   return 1
 }
 
