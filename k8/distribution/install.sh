@@ -2019,19 +2019,19 @@ json.dump(d, sys.stdout)
     if command -v crane &>/dev/null; then
       local AK_ADMIN_PASS
       AK_ADMIN_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get -field=admin_password secret/artifact-keeper/app 2>/dev/null)
-      crane auth login "artifacts.${LOCAL_REGISTRY}" -u admin -p "${AK_ADMIN_PASS}" 2>/dev/null
+      crane auth login "artifacts.${LOCAL_REGISTRY}" -u admin -p "${AK_ADMIN_PASS}" --insecure 2>/dev/null
 
       # Mirror buildpacks (ARM64)
       for bp in java:21.4.0 nodejs ruby procfile go php httpd; do
         local bp_name="${bp%%:*}"
-        crane cp --platform linux/arm64 "paketobuildpacks/${bp}" "${LOCAL_PREFIX}/buildpacks/${bp_name}:latest" 2>/dev/null && \
+        crane copy --platform linux/arm64 --insecure "docker.io/paketobuildpacks/${bp}" "${LOCAL_PREFIX}/buildpacks/${bp_name}:latest" 2>/dev/null && \
           log_success "  Mirrored ${bp_name}" || log_warn "  Failed to mirror ${bp_name}"
       done
 
       # Mirror stack images (ARM64)
-      crane cp --platform linux/arm64 "paketobuildpacks/build-jammy-full:latest" "${LOCAL_PREFIX}/stacks/build-jammy-full:latest" 2>/dev/null && \
+      crane copy --platform linux/arm64 --insecure "docker.io/paketobuildpacks/build-jammy-full:latest" "${LOCAL_PREFIX}/stacks/build-jammy-full:latest" 2>/dev/null && \
         log_success "  Mirrored build-jammy-full" || log_warn "  Failed to mirror build-jammy-full"
-      crane cp --platform linux/arm64 "paketobuildpacks/run-jammy-full:latest" "${LOCAL_PREFIX}/stacks/run-jammy-full:latest" 2>/dev/null && \
+      crane copy --platform linux/arm64 --insecure "docker.io/paketobuildpacks/run-jammy-full:latest" "${LOCAL_PREFIX}/stacks/run-jammy-full:latest" 2>/dev/null && \
         log_success "  Mirrored run-jammy-full" || log_warn "  Failed to mirror run-jammy-full"
 
       log_success "Buildpack images mirrored to local registry"
