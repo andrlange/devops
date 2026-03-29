@@ -1827,15 +1827,10 @@ install_phase_6() {
     local CONTOUR_REGISTRY="${REGISTRY:-artifactory.cfapps.cool}/${REGISTRY_REPO:-docker-local}"
     local APPS_LB_IP="$(get_metallb_apps_ip)"
 
-    # Install Contour gateway provisioner — filter out CRD resources to avoid
-    # storedVersions conflicts with K3s-bundled Gateway API CRDs.
-    # Uses awk to split YAML docs and skip any that are CustomResourceDefinition.
-    curl -sfL https://projectcontour.io/quickstart/contour-gateway-provisioner.yaml \
-      | awk '
-        /^---/ { if (doc && doc !~ /kind: CustomResourceDefinition/) print doc; doc="---\n"; next }
-        { doc = doc $0 "\n" }
-        END { if (doc && doc !~ /kind: CustomResourceDefinition/) print doc }
-      ' | kubectl apply -f - 2>&1 | tail -5
+    # Install Contour gateway provisioner with all CRDs (including ContourDeployment).
+    # The problematic backendtlspolicies CRD was already deleted in the Gateway API step.
+    kubectl apply --server-side --force-conflicts \
+      -f https://projectcontour.io/quickstart/contour-gateway-provisioner.yaml 2>&1 | tail -5
 
     # Create GatewayClass (required before Gateway)
     kubectl apply -f - <<GCEOF
