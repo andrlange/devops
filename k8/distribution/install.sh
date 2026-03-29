@@ -87,6 +87,12 @@ Apps Domain: ${apps_domain}
 | Grafana | https://grafana.${domain} | admin | \`${grafana_pw:-not yet set}\` |
 | Technitium DNS | https://dns.${domain} | admin | Set on first login |
 
+## Infrastructure — OpenBao
+
+| Service | URL | Details |
+|---------|-----|---------|
+| OpenBao UI | https://vault.${domain} | See openbao_credentials.md for root token and unseal keys |
+
 ## Infrastructure — Garage S3
 
 | Service | Details |
@@ -720,6 +726,11 @@ REGEOF
 
     ensure_namespace "openbao"
     helm_install_if_needed "openbao" "${K8_DIR}/services/openbao" "openbao"
+
+    # Apply IngressRoute for OpenBao UI
+    if [[ -f "${K8_DIR}/services/openbao/ingressroute.yaml" ]]; then
+      kubectl apply -f "${K8_DIR}/services/openbao/ingressroute.yaml" 2>/dev/null || true
+    fi
 
     log_info "Waiting for OpenBao pod to be Running..."
     wait_for_pod_running "openbao" "app.kubernetes.io/name=openbao" 120
