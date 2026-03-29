@@ -526,6 +526,9 @@ CFGEOF
   # Persist VM name into config.env so stack.sh picks it up without re-sourcing .install-config
   sed -i '' "s/^LIMA_VM_NAME=.*/LIMA_VM_NAME=\"${cfg_lima_vm_name}\"/" "${K8_DIR}/config.env"
 
+  # Re-source config to pick up new domain values before substitution
+  source "$CONFIG_FILE"
+
   # Substitute domains across all manifests
   substitute_domains
   echo ""
