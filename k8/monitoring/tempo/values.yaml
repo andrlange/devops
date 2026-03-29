@@ -20,12 +20,12 @@ tempo:
         backend: s3
         s3:
           endpoint: garage.garage.svc:3900
-          bucket: tempo-traces
+          bucket: tempo
           region: garage
           insecure: true
           forcepathstyle: true
-          access_key: GK67013419249d8ea85684b872
-          secret_key: 3ebd9aada2a607fded3707c7f4acf8c05bc958cc0a005874606b7efebea6a0ba
+          access_key: TEMPO_S3_ACCESS_KEY_PLACEHOLDER
+          secret_key: TEMPO_S3_SECRET_KEY_PLACEHOLDER
 
   resources:
     requests:

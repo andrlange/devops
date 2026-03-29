@@ -1275,6 +1275,24 @@ install_phase_2() {
       {"op":"add","path":"/spec/template/spec/containers/0/readinessProbe","value":{"tcpSocket":{"port":3903},"initialDelaySeconds":10,"periodSeconds":10,"failureThreshold":5}}
     ]' 2>/dev/null || true
 
+    # Patch monitoring values.yaml files with the actual S3 keys from OpenBao
+    log_info "Patching monitoring S3 credentials into Helm values..."
+    for svc in tempo loki; do
+      local svc_ak svc_sk
+      svc_ak=$(curl -s -H "Authorization: Bearer ${garage_admin_token}" \
+        "${garage_api}/v2/ListKeys" 2>/dev/null | jq -r ".[] | select(.name == \"${svc}\") | .accessKeyId" 2>/dev/null || echo "")
+      svc_sk=$(_bao_field secret_key "secret/garage/${svc}" 2>/dev/null || echo "")
+      if [[ -n "$svc_ak" ]] && [[ -n "$svc_sk" ]]; then
+        local vf="${K8_DIR}/monitoring/${svc}/values.yaml"
+        if [[ -f "$vf" ]]; then
+          sed -i '' \
+            -e "s/TEMPO_S3_ACCESS_KEY_PLACEHOLDER/${svc_ak}/g" \
+            -e "s/TEMPO_S3_SECRET_KEY_PLACEHOLDER/${svc_sk}/g" \
+            "$vf" 2>/dev/null || true
+        fi
+      fi
+    done
+
     log_success "Garage installed and bootstrapped"
     mark_component_installed "GARAGE" "$STATE_FILE"
   else
