@@ -1790,6 +1790,15 @@ install_phase_5() {
       return 0
     fi
 
+    # Wait for Rails to be fully initialized (readiness can return 200 before Rails is ready)
+    log_info "Waiting for GitLab Rails to initialize..."
+    for i in $(seq 1 12); do
+      if kubectl exec -n gitlab gitlab-0 -- gitlab-rails runner "puts 'ok'" 2>/dev/null | grep -q "ok"; then
+        break
+      fi
+      sleep 10
+    done
+
     # Create PAT via rails console
     log_info "Creating temporary access token..."
     local pat=$(kubectl exec -n gitlab gitlab-0 -- gitlab-rails runner "
