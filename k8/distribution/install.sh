@@ -2675,9 +2675,14 @@ for ns in sorted(namespaces):
 
     cf target -o kappman -s app 2>&1 | tail -1
 
-    # Grant kappman SA access to the new org/space namespaces
-    sleep 3  # Wait for Korifi to create the namespaces
-    for ns in $(kubectl get ns -o name 2>/dev/null | grep -v '^namespace/kube\|^namespace/default\|^namespace/local' | sed 's|namespace/||'); do
+    # Grant kappman SA access to ALL CF-managed namespaces (including the ones just created)
+    # Must run as cluster admin
+    kubectl config use-context "k3s-${LIMA_VM_NAME}" 2>/dev/null || true
+    sleep 5  # Wait for Korifi to create the namespaces
+
+    for ns in $(kubectl get ns -l korifi.cloudfoundry.org/org-guid -o name 2>/dev/null | sed 's|namespace/||') \
+              $(kubectl get ns -l korifi.cloudfoundry.org/space-guid -o name 2>/dev/null | sed 's|namespace/||') \
+              cf; do
       kubectl create rolebinding kappman-admin -n "$ns" \
         --clusterrole=korifi-controllers-admin \
         --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
@@ -2688,6 +2693,9 @@ for ns in sorted(namespaces):
         --clusterrole=korifi-controllers-space-developer \
         --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
     done
+
+    # Switch back to cf-admin for CF CLI operations
+    kubectl config use-context cf-admin 2>/dev/null || true
 
     log_success "Org 'kappman' / Space 'app' ready"
     mark_component_installed "phase8_org_space" "$STATE_FILE"
