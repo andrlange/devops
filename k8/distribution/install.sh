@@ -643,8 +643,20 @@ install_phase_1() {
     mark_component_installed "LIMA_K3S" "$STATE_FILE"
   else
     log_info "Lima VM + K3s already installed, skipping"
-    # Still need to set KUBECONFIG
+    # Still need to set KUBECONFIG and ensure K3s is reachable
     export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME}"
+
+    log_info "Waiting for K3s API to become reachable..."
+    local attempts=0
+    while ! kubectl get nodes --request-timeout=5s &>/dev/null; do
+      attempts=$((attempts + 1))
+      if [[ $attempts -ge 30 ]]; then
+        log_error "K3s API not reachable after 60s"
+        exit 1
+      fi
+      sleep 2
+    done
+    log_success "K3s API is reachable"
   fi
 
   # --- 1.2 Pull Secrets ---
