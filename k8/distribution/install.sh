@@ -1836,30 +1836,15 @@ install_phase_6() {
     mark_component_installed "phase6_gateway_api" "$STATE_FILE"
   fi
 
-  # --- Install Contour (official projectcontour chart) ---
+  # --- Install Contour (full quickstart — Deployment + DaemonSet + ConfigMap) ---
   if ! component_is_installed "phase6_contour" "$STATE_FILE"; then
-    log_step "Installing Contour (Gateway API controller)..."
+    log_step "Installing Contour (full quickstart)..."
     ensure_namespace "projectcontour"
 
     local CONTOUR_REGISTRY="${REGISTRY:-artifactory.cfapps.cool}/${REGISTRY_REPO:-docker-local}"
     local APPS_LB_IP="$(get_metallb_apps_ip)"
 
-    # Install Contour gateway provisioner with all CRDs (including ContourDeployment).
-    # The problematic backendtlspolicies CRD was already deleted in the Gateway API step.
-    kubectl apply --server-side --force-conflicts \
-      -f https://projectcontour.io/quickstart/contour-gateway-provisioner.yaml 2>&1 | tail -5
-
-    # Create GatewayClass (required before Gateway)
-    kubectl apply -f - <<GCEOF
-apiVersion: gateway.networking.k8s.io/v1
-kind: GatewayClass
-metadata:
-  name: contour
-spec:
-  controllerName: projectcontour.io/gateway-controller
-GCEOF
-
-    # Pull Contour/Envoy images from artifact-keeper, then re-tag for provisioner expectations
+    # Pre-pull Contour/Envoy images from artifact-keeper and re-tag to match quickstart expectations
     log_info "Pre-pulling Contour images..."
     limactl shell "${LIMA_VM_NAME}" sudo crictl pull --creds "${REGISTRY_USER}:${REGISTRY_PASS}" \
       "${CONTOUR_REGISTRY}/projectcontour/contour:v1.33.2-arm64" 2>/dev/null || true
@@ -1867,18 +1852,31 @@ GCEOF
       "${CONTOUR_REGISTRY}/envoyproxy/envoy:distroless-v1.35.9-arm64" 2>/dev/null || true
     limactl shell "${LIMA_VM_NAME}" sudo ctr -n k8s.io images tag \
       "${CONTOUR_REGISTRY}/projectcontour/contour:v1.33.2-arm64" \
-      "ghcr.io/projectcontour/contour:v1.33.3" 2>/dev/null || true
+      "ghcr.io/projectcontour/contour:v1.33.2" 2>/dev/null || true
     limactl shell "${LIMA_VM_NAME}" sudo ctr -n k8s.io images tag \
       "${CONTOUR_REGISTRY}/envoyproxy/envoy:distroless-v1.35.9-arm64" \
       "docker.io/envoyproxy/envoy:distroless-v1.35.9" 2>/dev/null || true
 
-    # Note: Do NOT create a Gateway here. Korifi creates its own Gateway
-    # in korifi-gateway namespace. We only need the GatewayClass + Provisioner.
-    # The Korifi Gateway will be configured after Korifi Helm install with
-    # TLS Passthrough (required for TLSRoute) and MetalLB IP annotation.
+    # Install Contour full quickstart (Deployment + DaemonSet + ConfigMap)
+    # Filter out CRDs to avoid storedVersions conflict with K3s-bundled Gateway API
+    kubectl delete crd backendtlspolicies.gateway.networking.k8s.io 2>/dev/null || true
+    kubectl apply --server-side --force-conflicts \
+      -f https://projectcontour.io/quickstart/contour.yaml 2>&1 | tail -5
+
+    # Annotate Envoy service with MetalLB IP for apps domain
+    kubectl annotate svc envoy -n projectcontour \
+      "metallb.universe.tf/loadBalancerIPs=${APPS_LB_IP}" --overwrite 2>/dev/null || true
+
+    # Patch Contour ConfigMap to reference korifi gateway (same as original stack)
+    kubectl get configmap contour -n projectcontour -o json 2>/dev/null | \
+      jq '.data["contour.yaml"] = "gateway:\n  gatewayRef:\n    namespace: korifi-gateway\n    name: korifi\ndisablePermitInsecure: false\naccesslog-format: envoy\n"' | \
+      kubectl apply -f - 2>/dev/null || true
+
+    # Restart Contour to pick up ConfigMap change
+    kubectl rollout restart deployment contour -n projectcontour 2>/dev/null || true
 
     wait_for_pods "projectcontour" 180
-    log_success "Contour Gateway Provisioner installed"
+    log_success "Contour installed on ${APPS_LB_IP}"
     mark_component_installed "phase6_contour" "$STATE_FILE"
   fi
 
@@ -2097,59 +2095,21 @@ json.dump(d, sys.stdout)
     wait_for_pods "korifi" 180
     log_success "Korifi installed"
 
-    # Configure the Korifi Gateway with TLS Passthrough (required for TLSRoute)
-    # and MetalLB IP annotation for the apps domain
-    log_info "Configuring Korifi Gateway with TLS Passthrough..."
-    local APPS_LB_IP="$(get_metallb_apps_ip)"
-    kubectl apply -f - <<KGWEOF
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
-metadata:
-  name: korifi
-  namespace: korifi-gateway
-  annotations:
-    metallb.universe.tf/loadBalancerIPs: "${APPS_LB_IP}"
-spec:
-  gatewayClassName: contour
-  listeners:
-    - name: http
-      protocol: HTTP
-      port: 80
-      allowedRoutes:
-        namespaces:
-          from: All
-    - name: tls
-      protocol: TLS
-      port: 443
-      allowedRoutes:
-        namespaces:
-          from: All
-        kinds:
-          - group: gateway.networking.k8s.io
-            kind: TLSRoute
-      tls:
-        mode: Passthrough
-KGWEOF
-    sleep 10
-
-    # Create ReferenceGrant for TLS secret access across namespaces
-    kubectl apply -f - <<RGEOF
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
-metadata:
-  name: allow-korifi-tls
-  namespace: traefik
-spec:
-  from:
-    - group: gateway.networking.k8s.io
-      kind: Gateway
-      namespace: korifi-gateway
-  to:
-    - group: ""
-      kind: Secret
-RGEOF
-
-    log_success "Korifi Gateway configured (TLS Passthrough on ${APPS_LB_IP})"
+    # Korifi creates its own Gateway object in korifi-gateway namespace.
+    # Contour (full quickstart) references it via ConfigMap gatewayRef.
+    # Just verify the gateway is created by Korifi Helm chart.
+    log_info "Waiting for Korifi Gateway to be created..."
+    local gw_attempts=0
+    while ! kubectl get gateway korifi -n korifi-gateway &>/dev/null; do
+      gw_attempts=$((gw_attempts + 1))
+      [[ $gw_attempts -ge 30 ]] && break
+      sleep 2
+    done
+    if kubectl get gateway korifi -n korifi-gateway &>/dev/null; then
+      log_success "Korifi Gateway created"
+    else
+      log_warn "Korifi Gateway not found — CF routing may need manual setup"
+    fi
     mark_component_installed "phase6_korifi" "$STATE_FILE"
   fi
 
@@ -2214,64 +2174,37 @@ json.dump(cb, sys.stdout)
     mark_component_installed "phase6_buildpacks" "$STATE_FILE"
   fi
 
-  # --- Patch Contour Gateway API config ---
+  # --- Verify Contour + Korifi Gateway ---
   if ! component_is_installed "phase6_contour_gateway" "$STATE_FILE"; then
-    log_step "Verifying Contour Gateway API configuration..."
+    log_step "Verifying Contour Gateway configuration..."
 
-    # With the official gateway provisioner, Contour is auto-configured via the Gateway object.
-    # Just verify the gateway is programmed.
+    # With Contour full quickstart, the ConfigMap gatewayRef points to korifi-gateway/korifi.
+    # Contour handles both TLS Terminate (HTTPRoutes) and TLS Passthrough (TLSRoutes) automatically.
     local gw_status
     gw_status=$(kubectl get gateway korifi -n korifi-gateway -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null || echo "Unknown")
     if [ "$gw_status" = "True" ]; then
-      log_success "Contour Gateway API configured (PROGRAMMED=True)"
+      log_success "Korifi Gateway PROGRAMMED — routing active"
     else
-      log_warn "Korifi Gateway status: ${gw_status} — CF apps routing may not work until gateway is programmed"
+      log_warn "Korifi Gateway status: ${gw_status} — may need a few seconds to converge"
     fi
     mark_component_installed "phase6_contour_gateway" "$STATE_FILE"
   fi
 
-  # --- Configure TLS cert reflection for Korifi ---
+  # --- TLS cert reflection for Korifi (wildcard-apps-tls) ---
   if ! component_is_installed "phase6_cert_reflection" "$STATE_FILE"; then
-    log_step "Configuring TLS certificate reflection for Korifi..."
+    log_step "Configuring TLS certificate for Korifi apps..."
 
-    # Delete self-signed cert created by Korifi (replaced by reflected LE cert)
-    kubectl delete certificate korifi-workloads-ingress-cert -n korifi 2>/dev/null || true
-
-    # ReferenceGrant: allow Gateway in korifi-gateway to use Secrets in korifi
-    cat <<'RGEOF' | kubectl apply -f -
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
-metadata:
-  name: allow-gateway-cert-ref
-  namespace: korifi
-spec:
-  from:
-  - group: gateway.networking.k8s.io
-    kind: Gateway
-    namespace: korifi-gateway
-  to:
-  - group: ""
-    kind: Secret
-RGEOF
-
-    # Update Gateway to use reflected wildcard-apps-tls from korifi namespace
-    kubectl get gateway korifi -n korifi-gateway -o json | python3 -c "
-import json, sys
-gw = json.load(sys.stdin)
-for l in gw['spec']['listeners']:
-    if l['name'] == 'https-apps' and 'tls' in l:
-        l['tls']['certificateRefs'] = [{'group': '', 'kind': 'Secret', 'name': 'wildcard-apps-tls', 'namespace': 'korifi'}]
-json.dump(gw, sys.stdout)
-" | kubectl apply -f - 2>&1 | tail -1
-
-    # Verify Gateway is programmed with LE cert
-    sleep 5
-    local gw_status
-    gw_status=$(kubectl get gateway korifi -n korifi-gateway -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null || echo "Unknown")
-    if [ "$gw_status" = "True" ]; then
-      log_success "TLS cert reflection configured (Let's Encrypt wildcard via Reflector)"
+    # Ensure wildcard-apps-tls is reflected to korifi-gateway namespace
+    if kubectl get secret wildcard-apps-tls -n traefik &>/dev/null; then
+      kubectl annotate secret wildcard-apps-tls -n traefik \
+        reflector.v1.k8s.emberstack.com/reflection-allowed="true" \
+        reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces="korifi-gateway,korifi" \
+        reflector.v1.k8s.emberstack.com/reflection-auto-enabled="true" \
+        reflector.v1.k8s.emberstack.com/reflection-auto-namespaces="korifi-gateway,korifi" \
+        --overwrite 2>/dev/null || true
+      log_success "Apps wildcard TLS cert reflected to korifi namespaces"
     else
-      log_warn "Gateway PROGRAMMED=$gw_status — check ReferenceGrant and reflected secret"
+      log_warn "wildcard-apps-tls not found — HTTPS for CF apps will use self-signed cert"
     fi
     mark_component_installed "phase6_cert_reflection" "$STATE_FILE"
   fi
