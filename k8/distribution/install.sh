@@ -105,6 +105,7 @@ Apps Domain: ${apps_domain}
 | Velero S3 Secret | \`${velero_sk:-not yet set}\` |
 | Velero Bucket | velero |
 | Backup UI | https://backup.${domain} |
+| Backup UI Login | admin / \`velero-admin-2026\` |
 
 ## Application Services
 
