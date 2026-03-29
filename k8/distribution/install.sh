@@ -2555,7 +2555,7 @@ install_phase_7() {
 
     # Get broker password from OpenBao
     local BROKER_PASS
-    BROKER_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get -field=password secret/cf-service-broker/auth 2>/dev/null)
+    BROKER_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get "-field=password" secret/cf-service-broker/auth 2>/dev/null)
 
     # Update deployment with password from OpenBao
     sed "s/vxfSHItmMi82oL1vrGhV/${BROKER_PASS}/g" \
@@ -2571,10 +2571,13 @@ install_phase_7() {
     log_step "Registering service broker with Korifi..."
 
     local BROKER_PASS
-    BROKER_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get -field=password secret/cf-service-broker/auth 2>/dev/null)
+    BROKER_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get "-field=password" secret/cf-service-broker/auth 2>/dev/null)
 
-    # Switch to cf-admin context
+    # Switch to cf-admin context and login to CF
     kubectl config use-context cf-admin 2>/dev/null || true
+    local CF_DOMAIN="${APPS_DOMAIN:-apps.cfapps.cool}"
+    cf api "https://api.${CF_DOMAIN}" --skip-ssl-validation 2>&1 | tail -1
+    cf auth cf-admin 2>&1 | tail -1
 
     cf create-service-broker k8s-services admin "${BROKER_PASS}" \
       http://cf-service-broker.cf-services.svc.cluster.local 2>&1 | tail -1
