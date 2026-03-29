@@ -134,7 +134,33 @@ All service passwords, tokens, and unseal keys are written to `credentials.md` i
 ./k8/stack.sh stop        # Stop the stack
 ./k8/stack.sh status      # Check status of all components
 ./k8/stack.sh restart     # Restart the stack
+./k8/stack.sh switch      # Switch between K8s admin and CF admin context
 ./k8/stack.sh deletestack # Permanently remove a stack instance
+```
+
+### Switching Contexts (Kubernetes vs Cloud Foundry)
+
+The stack uses two kubectl contexts:
+
+| Context | Purpose | When to use |
+|---------|---------|-------------|
+| `k3s-<vm-name>` | Cluster admin | Managing K8s resources, Helm, debugging pods |
+| `cf-admin` | CF admin | `cf push`, `cf create-service`, CF CLI operations |
+
+Switch manually:
+```bash
+# Kubernetes admin (default)
+kubectl config use-context k3s-<vm-name>
+
+# Cloud Foundry admin (for cf CLI)
+kubectl config use-context cf-admin
+cf api https://api.<apps-domain> --skip-ssl-validation
+cf auth cf-admin
+```
+
+Or use `stack.sh switch`:
+```bash
+./k8/stack.sh switch      # Toggle between k3s admin and cf-admin contexts
 ```
 
 ### Service URLs
