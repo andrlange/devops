@@ -1923,6 +1923,16 @@ install_phase_6() {
     kubectl apply --server-side --force-conflicts \
       -f https://projectcontour.io/quickstart/contour.yaml 2>&1 | tail -5
 
+    # Create GatewayClass (required for Contour to process Gateway objects)
+    kubectl apply -f - <<GCEOF
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: contour
+spec:
+  controllerName: projectcontour.io/gateway-controller
+GCEOF
+
     # Annotate Envoy service with MetalLB IP for apps domain
     kubectl annotate svc envoy -n projectcontour \
       "metallb.universe.tf/loadBalancerIPs=${APPS_LB_IP}" --overwrite 2>/dev/null || true
