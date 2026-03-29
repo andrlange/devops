@@ -252,6 +252,25 @@ substitute_domains() {
     "${K8_DIR}/config.env"
 
   log_success "Domains substituted in ${count} files"
+
+  # Also patch any already-deployed IngressRoutes in the cluster that still have old domains
+  if kubectl get ingressroute -A &>/dev/null; then
+    local stale_routes
+    stale_routes=$(kubectl get ingressroute -A -o json 2>/dev/null \
+      | jq -r '.items[] | select(.spec.routes[].match | contains("cfapps.cool")) | "\(.metadata.namespace)/\(.metadata.name)"' 2>/dev/null || echo "")
+    if [[ -n "$stale_routes" ]]; then
+      log_info "Patching live IngressRoutes with new domains..."
+      while IFS= read -r item; do
+        [[ -z "$item" ]] && continue
+        local ns="${item%%/*}"
+        local name="${item##*/}"
+        kubectl get ingressroute "$name" -n "$ns" -o json \
+          | jq ".spec.routes[].match |= gsub(\"development\\\\.cfapps\\\\.cool\"; \"${platform_domain}\") | .spec.routes[].match |= gsub(\"app\\\\.cfapps\\\\.cool\"; \"${apps_domain}\")" \
+          | kubectl apply -f - >/dev/null 2>&1 || true
+      done <<< "$stale_routes"
+      log_success "Live IngressRoutes patched"
+    fi
+  fi
 }
 
 # =============================================================================
