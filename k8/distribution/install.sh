@@ -1304,6 +1304,11 @@ install_phase_2() {
     ensure_namespace "velero"
 
     if [[ -d "${K8_DIR}/velero" ]]; then
+      # Apply Velero S3 ExternalSecret before Helm install (Velero needs the secret to start)
+      if [[ -f "${K8_DIR}/velero/velero-external-secret.yaml" ]]; then
+        kubectl apply -f "${K8_DIR}/velero/velero-external-secret.yaml" 2>&1 | tail -1
+        sleep 5  # Wait for ESO to sync the secret
+      fi
       helm_install_if_needed "velero" "${K8_DIR}/velero" "velero"
       wait_for_pods "velero" 120
 
