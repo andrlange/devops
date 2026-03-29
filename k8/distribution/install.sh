@@ -1896,9 +1896,14 @@ GWEOF
     local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-development.cfapps.cool}"
     local LOCAL_AK="https://artifacts.${LOCAL_REGISTRY}"
 
+    # Ensure OpenBao is logged in
+    if [[ -n "${OPENBAO_ROOT_TOKEN:-}" ]]; then
+      kubectl exec -n openbao openbao-0 -- bao login "${OPENBAO_ROOT_TOKEN}" >/dev/null 2>&1 || true
+    fi
+
     # Get admin credentials from OpenBao
     local AK_ADMIN_PASS
-    AK_ADMIN_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get -field=admin_password secret/artifact-keeper/app 2>/dev/null)
+    AK_ADMIN_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get "-field=admin_password" secret/artifact-keeper/app 2>/dev/null || echo "")
 
     # Login to get token
     local AK_TOKEN
