@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head(${space?.name ?: 'Space'})}"></head>
+<body>
+<div class="app-container">
+    <nav th:replace="~{fragments/layout :: sidebar}"></nav>
+    <div class="main-wrapper">
+        <header th:replace="~{fragments/layout :: topbar}"></header>
+        <main class="main-content">
+
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a th:href="@{/orgs}">Organizations</a></li>
+                    <li class="breadcrumb-item"><a th:href="@{/orgs/{guid}(guid=${org?.guid})}" th:text="${org?.name}"></a></li>
+                    <li class="breadcrumb-item active" th:text="${space?.name}"></li>
+                </ol>
+            </nav>
+
+            <div class="content-card mb-3">
+                <h6>Space Details</h6>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-2"><span class="text-muted">Name:</span> <span th:text="${space?.name}"></span></div>
+                        <div class="mb-2"><span class="text-muted">GUID:</span> <span class="mono" th:text="${space?.guid}"></span></div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-2"><span class="text-muted">K8s Namespace:</span> <span class="mono" th:text="'cf-space-' + ${space?.guid}"></span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Apps in Space -->
+            <div class="content-card mb-3">
+                <h6>Applications</h6>
+                <div th:if="${#lists.isEmpty(apps)}" class="text-muted small">No applications in this space</div>
+                <div class="table-responsive" th:unless="${#lists.isEmpty(apps)}">
+                    <table class="table table-hover">
+                        <thead><tr><th>Name</th><th>State</th></tr></thead>
+                        <tbody>
+                            <tr th:each="app : ${apps}">
+                                <td>
+                                    <a th:href="@{/apps/{guid}(guid=${app.guid})}" class="text-decoration-none text-spring-green">
+                                        <i class="bi bi-box me-1"></i> <span th:text="${app.name}"></span>
+                                    </a>
+                                </td>
+                                <td>
+                                    <span class="badge" th:classappend="${app.state == 'STARTED' ? 'badge-started' : (app.state == 'STOPPED' ? 'badge-stopped' : 'badge-staging')}" th:text="${app.state}"></span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Services in Space -->
+            <div class="content-card">
+                <h6>Service Instances</h6>
+                <div th:if="${#lists.isEmpty(services)}" class="text-muted small">No service instances in this space</div>
+                <div class="table-responsive" th:unless="${#lists.isEmpty(services)}">
+                    <table class="table table-hover">
+                        <thead><tr><th>Name</th><th>Type</th><th>Status</th></tr></thead>
+                        <tbody>
+                            <tr th:each="svc : ${services}">
+                                <td><i class="bi bi-plug me-1"></i> <span th:text="${svc.name}"></span></td>
+                                <td>
+                                    <span th:if="${svc.type == 'managed'}" class="badge bg-dark border" title="Provisioned via Service Broker"><i class="bi bi-gear me-1"></i>Broker-Managed</span>
+                                    <span th:if="${svc.type == 'user_provided'}" class="badge bg-dark border" title="Manually configured"><i class="bi bi-person me-1"></i>User-Provided</span>
+                                    <span th:if="${svc.type != 'managed' and svc.type != 'user_provided'}" class="text-muted" th:text="${svc.type}"></span>
+                                </td>
+                                <td th:text="${svc.lastOperation?.state ?: '-'}"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </main>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

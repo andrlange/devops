@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: kappman
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:h2:mem:kappman;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE}
+    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+server:
+  port: ${PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+kappman:
+  cf-api:
+    url: ${CF_API_URL:https://api.app.cfapps.cool}
+    username: ${CF_USERNAME:cf-admin}
+    password: ${CF_PASSWORD:}
+    skip-ssl: ${CF_SKIP_SSL:true}
+  instance-id: ${CF_INSTANCE_INDEX:${HOSTNAME:local}}

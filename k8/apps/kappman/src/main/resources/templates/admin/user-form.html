@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head(${isNew ? 'Create User' : 'Edit User'})}"></head>
+<body>
+<div class="app-container">
+    <nav th:replace="~{fragments/layout :: sidebar}"></nav>
+    <div class="main-wrapper">
+        <header th:replace="~{fragments/layout :: topbar}"></header>
+        <main class="main-content">
+
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a th:href="@{/admin/users}">Users</a></li>
+                    <li class="breadcrumb-item active" th:text="${isNew ? 'Create' : 'Edit'}"></li>
+                </ol>
+            </nav>
+
+            <div class="content-card" style="max-width: 500px;">
+                <form th:action="${isNew ? '/admin/users' : '/admin/users/' + user.id}" method="post">
+                    <div class="mb-3">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-control" name="username"
+                               th:value="${isNew ? '' : user.username}"
+                               th:readonly="${!isNew}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" th:text="${isNew ? 'Password' : 'Password (leave blank to keep)'}"></label>
+                        <input type="password" class="form-control" name="password" th:required="${isNew}">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Display Name</label>
+                        <input type="text" class="form-control" name="displayName" th:value="${isNew ? '' : user.displayName}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email</label>
+                        <input type="email" class="form-control" name="email" th:value="${isNew ? '' : user.email}">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Role</label>
+                        <select class="form-select" name="role" required>
+                            <option th:each="r : ${roles}" th:value="${r}" th:text="${r}" th:selected="${!isNew && user.role == r}"></option>
+                        </select>
+                    </div>
+                    <div class="mb-3 form-check" th:unless="${isNew}">
+                        <input type="checkbox" class="form-check-input" name="enabled" id="enabled" th:checked="${user.enabled}">
+                        <label class="form-check-label" for="enabled">Enabled</label>
+                    </div>
+                    <button type="submit" class="btn btn-spring-green" th:text="${isNew ? 'Create' : 'Save'}"></button>
+                    <a th:href="@{/admin/users}" class="btn btn-secondary ms-2">Cancel</a>
+                </form>
+            </div>
+
+        </main>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

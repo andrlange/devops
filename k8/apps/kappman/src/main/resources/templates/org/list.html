@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head th:replace="~{fragments/layout :: head('Organizations')}"></head>
+<body>
+<div class="app-container">
+    <nav th:replace="~{fragments/layout :: sidebar}"></nav>
+    <div class="main-wrapper">
+        <header th:replace="~{fragments/layout :: topbar}"></header>
+        <main class="main-content">
+
+            <div th:if="${success}" class="alert alert-success alert-dismissible fade show" role="alert">
+                <span th:text="${success}"></span>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            <div th:if="${error}" class="alert alert-danger alert-dismissible fade show" role="alert">
+                <span th:text="${error}"></span>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center mb-3" th:if="${isAdmin}">
+                <div></div>
+                <button class="btn btn-sm btn-spring-green" data-bs-toggle="modal" data-bs-target="#createOrgModal">
+                    <i class="bi bi-plus-lg me-1"></i> Create Organization
+                </button>
+            </div>
+
+            <div th:if="${#lists.isEmpty(orgs)}" class="empty-state">
+                <i class="bi bi-building d-block"></i>
+                <p>No organizations found</p>
+            </div>
+
+            <div class="table-responsive" th:unless="${#lists.isEmpty(orgs)}">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>GUID</th>
+                            <th>Spaces</th>
+                            <th>Users</th>
+                            <th>Created</th>
+                            <th th:if="${isAdmin}">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="entry : ${orgs}">
+                            <td>
+                                <a th:href="@{/orgs/{guid}(guid=${entry.org.guid})}" class="text-decoration-none text-spring-green">
+                                    <i class="bi bi-building me-1"></i>
+                                    <span th:text="${entry.org.name}"></span>
+                                </a>
+                            </td>
+                            <td class="mono text-muted" th:text="${#strings.abbreviate(entry.org.guid, 20)}"></td>
+                            <td th:text="${entry.spaceCount}"></td>
+                            <td><span class="badge bg-dark border"><i class="bi bi-people me-1"></i><span th:text="${entry.userCount}"></span></span></td>
+                            <td class="text-muted" th:text="${entry.org.createdAt != null ? #strings.substring(entry.org.createdAt, 0, 10) : '-'}"></td>
+                            <td th:if="${isAdmin}">
+                                <form th:action="@{/orgs/{guid}/delete(guid=${entry.org.guid})}" method="post" class="d-inline"
+                                      onsubmit="return confirm('Delete this organization?')">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Create Org Modal -->
+            <div class="modal fade" id="createOrgModal" tabindex="-1" th:if="${isAdmin}">
+                <div class="modal-dialog">
+                    <div class="modal-content" style="background: var(--spring-card); border-color: var(--spring-border);">
+                        <form th:action="@{/orgs}" method="post">
+                            <div class="modal-header border-secondary">
+                                <h5 class="modal-title">Create Organization</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="mb-3">
+                                    <label for="orgName" class="form-label">Organization Name</label>
+                                    <input type="text" class="form-control" id="orgName" name="name" required autofocus>
+                                </div>
+                            </div>
+                            <div class="modal-footer border-secondary">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                <button type="submit" class="btn btn-spring-green">Create</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

@@ -1,0 +1,16 @@
+prometheus-node-exporter:
+  image:
+    registry: artifactory.cfapps.cool
+    repository: docker-local/quay.io/prometheus/node-exporter
+    tag: v1.10.2-arm64
+
+  imagePullSecrets:
+    - name: artifact-keeper-pull
+
+  resources:
+    requests:
+      memory: 32Mi
+      cpu: 25m
+    limits:
+      memory: 64Mi
+      cpu: 100m

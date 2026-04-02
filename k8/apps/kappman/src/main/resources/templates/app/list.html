@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Applications')}"></head>
+<body>
+<div class="app-container">
+    <nav th:replace="~{fragments/layout :: sidebar}"></nav>
+    <div class="main-wrapper">
+        <header th:replace="~{fragments/layout :: topbar}"></header>
+        <main class="main-content">
+
+            <div th:if="${success}" class="alert alert-success alert-dismissible fade show"><span th:text="${success}"></span><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+            <div th:if="${error}" class="alert alert-danger alert-dismissible fade show"><span th:text="${error}"></span><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+
+            <div th:if="${#lists.isEmpty(orgGroups)}" class="empty-state">
+                <i class="bi bi-box d-block"></i>
+                <p>No applications found</p>
+            </div>
+
+            <div th:each="orgGroup, orgStat : ${orgGroups}" class="mb-4">
+                <!-- Org Header (collapsible) -->
+                <div class="d-flex align-items-center p-2 rounded" style="cursor:pointer;background:rgba(232,167,53,0.08);"
+                     data-bs-toggle="collapse" th:data-bs-target="'#apps-org-' + ${orgStat.index}">
+                    <i class="bi bi-chevron-down me-2" style="color:#e8a735;"></i>
+                    <a th:href="@{/orgs/{guid}(guid=${orgGroup.orgGuid})}" class="text-decoration-none" onclick="event.stopPropagation();">
+                        <i class="bi bi-building me-1" style="color:#e8a735;"></i>
+                        <span style="color:#e8a735;font-weight:600;" th:text="${orgGroup.orgName}"></span>
+                    </a>
+                    <span class="badge bg-dark border ms-2" th:text="${orgGroup.userCount} + ' users'">
+                        <i class="bi bi-people"></i>
+                    </span>
+                </div>
+
+                <div class="collapse show ms-3 mt-2" th:id="'apps-org-' + ${orgStat.index}">
+                    <div th:each="spaceGroup, spaceStat : ${orgGroup.spaceGroups}" class="mb-3">
+                        <!-- Space Header (collapsible) -->
+                        <div class="d-flex align-items-center p-2 rounded" style="cursor:pointer;background:rgba(74,158,255,0.06);"
+                             data-bs-toggle="collapse" th:data-bs-target="'#apps-space-' + ${orgStat.index} + '-' + ${spaceStat.index}">
+                            <i class="bi bi-chevron-down me-2" style="color:#4a9eff;"></i>
+                            <i class="bi bi-layers me-1" style="color:#4a9eff;"></i>
+                            <span style="color:#4a9eff;" th:text="${spaceGroup.spaceName}"></span>
+                            <span class="badge bg-dark border ms-2" th:text="${#lists.size(spaceGroup.apps)} + ' apps'"></span>
+                            <span class="badge bg-dark border ms-1" th:text="${spaceGroup.userCount} + ' users'">
+                                <i class="bi bi-people"></i>
+                            </span>
+                        </div>
+
+                        <!-- Apps Table -->
+                        <div class="collapse show ms-3 mt-1" th:id="'apps-space-' + ${orgStat.index} + '-' + ${spaceStat.index}">
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>State</th>
+                                            <th>Buildpack</th>
+                                            <th>Memory</th>
+                                            <th>Disk</th>
+                                            <th>Routes</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr th:each="entry : ${spaceGroup.apps}">
+                                            <td>
+                                                <a th:href="@{/apps/{guid}(guid=${entry.app.guid})}" class="text-decoration-none text-spring-green">
+                                                    <i class="bi bi-box me-1"></i> <span th:text="${entry.app.name}"></span>
+                                                </a>
+                                            </td>
+                                            <td>
+                                                <span class="badge" th:classappend="${entry.app.state == 'STARTED' ? 'badge-started' : (entry.app.state == 'STOPPED' ? 'badge-stopped' : 'badge-staging')}" th:text="${entry.app.state}"></span>
+                                            </td>
+                                            <td><span class="badge bg-dark border" style="font-size:9px;" th:text="${entry.buildpack}"></span></td>
+                                            <td class="mono small text-muted" th:text="${entry.memoryMb > 0 ? entry.memoryMb + ' MB' : '-'}"></td>
+                                            <td class="mono small text-muted" th:text="${entry.diskMb > 0 ? entry.diskMb + ' MB' : '-'}"></td>
+                                            <td>
+                                                <div th:each="route : ${entry.routes}" class="small">
+                                                    <a th:href="'https://' + ${route}" target="_blank" class="mono text-muted text-decoration-none" th:text="${route}"></a>
+                                                </div>
+                                                <span th:if="${#lists.isEmpty(entry.routes)}" class="text-muted small">-</span>
+                                            </td>
+                                            <td>
+                                                <a th:href="@{/apps/{guid}(guid=${entry.app.guid})}" class="btn btn-sm btn-outline-secondary">
+                                                    <i class="bi bi-eye"></i>
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

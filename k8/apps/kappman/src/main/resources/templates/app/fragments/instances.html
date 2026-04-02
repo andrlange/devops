@@ -1,0 +1,8 @@
+<h6 xmlns:th="http://www.thymeleaf.org">Instances</h6>
+<div th:each="proc : ${processes}" th:if="${proc.type == 'web'}">
+    <div class="mb-2">
+        <span class="text-muted">Instances:</span> <span th:text="${proc.instances}"></span>
+        <span class="text-muted ms-3">Memory:</span> <span th:text="${proc.memoryInMb + 'MB'}"></span>
+        <span class="text-muted ms-3">Disk:</span> <span th:text="${proc.diskInMb + 'MB'}"></span>
+    </div>
+</div>

@@ -109,6 +109,32 @@ All container images are pulled from artifact-keeper at `artifactory.cfapps.cool
 - Some Helm charts use a `registry`/`repository` split; others need the full URL in `repository`
 - Mimir runs as a standalone Deployment (not the mimir-distributed chart)
 
+## Build & Push Distribution
+
+```bash
+# 1. Build dist/installer.sh + dist/stack.tgz
+./build-distribution.sh
+
+# 2. Upload to artifact-keeper generic repo (rename files with version suffix)
+VERSION="1.0.23"
+cp dist/installer.sh /tmp/installer-v${VERSION}.sh
+cp dist/stack.tgz /tmp/stack-v${VERSION}.tgz
+
+curl -sk -u "admin:<password>" -X POST \
+  "https://artifactory.cfapps.cool/api/v1/repositories/generic/artifacts" \
+  -F "file=@/tmp/installer-v${VERSION}.sh"
+
+curl -sk -u "admin:<password>" -X POST \
+  "https://artifactory.cfapps.cool/api/v1/repositories/generic/artifacts" \
+  -F "file=@/tmp/stack-v${VERSION}.tgz"
+
+# 3. Users download and install with:
+BASE=https://artifactory.cfapps.cool/api/v1/repositories/generic/download
+curl -sfL $BASE/installer-v${VERSION}.sh -o installer.sh
+curl -sfL $BASE/stack-v${VERSION}.tgz -o stack.tgz
+bash installer.sh
+```
+
 ## Documents
 
 - Design Specification: `k8/docs/superpowers/specs/2026-03-19-k8s-devops-stack-design.md`

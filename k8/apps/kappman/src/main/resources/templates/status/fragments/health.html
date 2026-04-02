@@ -1,0 +1,71 @@
+<div xmlns:th="http://www.thymeleaf.org">
+    <div th:if="${!cfConfigured}" class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle me-2"></i> CF API not configured. Set CF_PASSWORD to enable health checks.
+    </div>
+
+    <div class="row g-3">
+        <!-- CF API -->
+        <div class="col-md-6">
+            <div class="content-card">
+                <h6>CF API v3</h6>
+                <div th:if="${cfApiHealthy}">
+                    <div class="mb-2"><span class="health-dot ok"></span> <span class="health-ok">Healthy</span></div>
+                    <div th:if="${cfInfo}" class="small">
+                        <div class="text-muted">Name: <span class="mono" th:text="${cfInfo.name ?: '-'}"></span></div>
+                        <div class="text-muted">Build: <span class="mono" th:text="${cfInfo.build ?: '-'}"></span></div>
+                        <div class="text-muted">Version: <span class="mono" th:text="${cfInfo.version ?: '-'}"></span></div>
+                    </div>
+                </div>
+                <div th:unless="${cfApiHealthy}">
+                    <span class="health-dot error"></span> <span class="health-error">Unreachable</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gateway -->
+        <div class="col-md-6">
+            <div class="content-card">
+                <h6>Gateway (Contour)</h6>
+                <div th:if="${cfApiHealthy}">
+                    <span class="health-dot ok"></span> <span class="health-ok">Reachable</span>
+                    <div class="text-muted small mt-1">API accessible via gateway</div>
+                </div>
+                <div th:unless="${cfApiHealthy}">
+                    <span class="health-dot error"></span> <span class="health-error">Unknown</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- kpack -->
+        <div class="col-md-6">
+            <div class="content-card">
+                <h6>kpack (Buildpacks)</h6>
+                <div th:if="${kpackHealthy}">
+                    <span class="health-dot ok"></span> <span class="health-ok">Ready</span>
+                    <div class="text-muted small mt-1" th:text="${buildpackCount + ' buildpacks available'}"></div>
+                </div>
+                <div th:unless="${kpackHealthy}">
+                    <span class="health-dot error"></span> <span class="health-error">No buildpacks found</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Service Broker -->
+        <div class="col-md-6">
+            <div class="content-card">
+                <h6>Service Broker</h6>
+                <div th:if="${brokerHealthy}">
+                    <span class="health-dot ok"></span> <span class="health-ok">Available</span>
+                    <div class="text-muted small mt-1" th:text="${offeringCount + ' service offerings'}"></div>
+                </div>
+                <div th:unless="${brokerHealthy}">
+                    <span class="health-dot error"></span> <span class="health-error">No offerings available</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="text-muted small mt-3">
+        <i class="bi bi-arrow-repeat me-1"></i> Auto-refreshing every 30 seconds
+    </div>
+</div>

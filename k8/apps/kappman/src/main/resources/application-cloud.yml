@@ -1,0 +1,9 @@
+# Cloud profile — auto-activated by java-cfenv when VCAP_SERVICES is present
+spring:
+  datasource:
+    driver-class-name: org.postgresql.Driver
+  h2:
+    console:
+      enabled: false
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect

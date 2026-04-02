@@ -75,6 +75,12 @@ write_credentials() {
     local velero_ak="$(_bao_field access_key secret/garage/velero)"
     local velero_sk="$(_bao_field secret_key secret/garage/velero)"
 
+    # Compute GitLab SSH IP from MetalLB range (first IP + 2)
+    local metallb_first="${METALLB_IP_RANGE%%-*}"
+    local ip_base="${metallb_first%.*}"
+    local ip_last="${metallb_first##*.}"
+    local gitlab_ssh_ip="${ip_base}.$((ip_last + 2))"
+
     cat > "$cred_file" <<CRED_EOF
 # Stack Credentials
 
@@ -127,7 +133,7 @@ Apps Domain: ${apps_domain}
 |---------|-----|----------|----------------|
 | artifact-keeper | https://artifacts.${domain} | admin | \`${ak_pw:-not yet set}\` |
 | GitLab CE | https://gitlab.${domain} | root | \`${gitlab_pw:-not yet set}\` |
-| GitLab SSH | ssh://git@192.168.64.202:22 | | |
+| GitLab SSH | ssh://git@${gitlab_ssh_ip}:22 | | |
 
 ## Cloud Foundry (Phase 6+)
 
@@ -279,6 +285,7 @@ substitute_domains() {
     -e "s/^PLATFORM_DOMAIN=.*/PLATFORM_DOMAIN=\"${platform_domain}\"/" \
     -e "s/^APPS_DOMAIN=.*/APPS_DOMAIN=\"${apps_domain}\"/" \
     -e "s/^ACME_EMAIL=.*/ACME_EMAIL=\"${acme_email}\"/" \
+    -e "s/^ACME_DNS_ZONES_CLOUDDNS=.*/ACME_DNS_ZONES_CLOUDDNS=\"${base_domain}\"/" \
     "${K8_DIR}/config.env"
 
   log_success "Domains substituted in ${count} files"
@@ -332,7 +339,16 @@ cmd_zero() {
   cfg_arch=$(ask_choice "Target architecture" "arm64" "amd64")
 
   local cfg_lima_vm_name
-  cfg_lima_vm_name=$(ask "Lima VM name" "${LIMA_VM_NAME:-k3s-server}")
+  while true; do
+    cfg_lima_vm_name=$(ask "Lima VM name" "${LIMA_VM_NAME:-k3s-server}")
+    if [[ "$cfg_lima_vm_name" == k3s-* ]]; then
+      break
+    fi
+    log_warn "VM name must start with 'k3s-' (required by stack.sh). Auto-prefixing..."
+    cfg_lima_vm_name="k3s-${cfg_lima_vm_name}"
+    log_info "Using: ${cfg_lima_vm_name}"
+    break
+  done
 
   local cfg_lima_cpus
   while true; do
@@ -353,14 +369,14 @@ cmd_zero() {
   done
 
   # -------------------------------------------------------------------------
-  # 2. Network Settings (auto-detected — vzNAT always uses 192.168.64.0/24)
+  # 2. Network Settings (auto-detected from VM subnet after start)
   # -------------------------------------------------------------------------
   print_section "2. Network Settings"
   echo ""
 
   log_info "Network is auto-configured by macOS Virtualization.framework (vzNAT)."
-  log_info "Subnet: 192.168.64.0/24 (fixed, not configurable)"
-  log_info "MetalLB IP range: 192.168.64.200-192.168.64.210"
+  log_info "Subnet will be detected after VM start (typically 192.168.64.0/24)."
+  log_info "MetalLB IPs and config will be adapted automatically if subnet differs."
   echo ""
 
   local cfg_network_subnet="192.168.64.0/24"
@@ -475,8 +491,8 @@ cmd_zero() {
     "Lima CPUs=${cfg_lima_cpus}"
     "Lima Memory=${cfg_lima_memory}GB"
     "Lima Disk=${cfg_lima_disk}GB"
-    "Network=192.168.64.0/24 (vzNAT, fixed)"
-    "MetalLB IP Range=192.168.64.200-210 (fixed)"
+    "Network=192.168.64.0/24 (vzNAT, auto-adapted after VM start)"
+    "MetalLB IP Range=192.168.64.200-210 (auto-adapted after VM start)"
     "Platform Domain=${cfg_base_domain}"
     "Apps Domain=${cfg_apps_domain}"
     "ACME Email=${cfg_acme_email}"
@@ -553,8 +569,11 @@ CFGEOF
   chmod 600 "$CONFIG_FILE"
   log_success "Configuration saved to $CONFIG_FILE"
 
-  # Persist VM name into config.env so stack.sh picks it up without re-sourcing .install-config
-  sed -i '' "s/^LIMA_VM_NAME=.*/LIMA_VM_NAME=\"${cfg_lima_vm_name}\"/" "${K8_DIR}/config.env"
+  # Persist key settings into config.env so stack.sh picks them up without re-sourcing .install-config
+  sed -i '' \
+    -e "s/^LIMA_VM_NAME=.*/LIMA_VM_NAME=\"${cfg_lima_vm_name}\"/" \
+    -e "s/^GCP_PROJECT_ID=.*/GCP_PROJECT_ID=\"${cfg_gcp_project_id}\"/" \
+    "${K8_DIR}/config.env"
 
   # Re-source config to pick up new domain values before substitution
   source "$CONFIG_FILE"
@@ -627,11 +646,37 @@ install_phase_1() {
       exit 1
     fi
 
-    # Verify VM is on the expected vzNAT subnet (192.168.64.0/24)
-    if [[ "$VM_IP" != 192.168.64.* ]]; then
-      log_warn "VM IP ${VM_IP} is NOT on expected subnet 192.168.64.0/24"
-      log_warn "MetalLB range 192.168.64.200-210 may not be reachable."
-      log_warn "If services are unreachable, adjust METALLB_IP_RANGE in config.env"
+    # Derive subnet prefix from VM IP and adapt all configuration files
+    local vm_subnet_prefix="${VM_IP%.*}"   # e.g. "192.168.106"
+    local default_prefix="192.168.64"
+
+    if [[ "$vm_subnet_prefix" != "$default_prefix" ]]; then
+      log_warn "VM is on subnet ${vm_subnet_prefix}.0/24 (not default ${default_prefix}.0/24)"
+      log_info "Adapting all configuration files to new subnet..."
+
+      # Patch config.env
+      sed -i.bak "s|${default_prefix}|${vm_subnet_prefix}|g" "${K8_DIR}/config.env"
+      rm -f "${K8_DIR}/config.env.bak"
+
+      # Patch MetalLB IP pool
+      if [[ -f "${K8_DIR}/infrastructure/metallb/ip-pool.yaml" ]]; then
+        sed -i.bak "s|${default_prefix}|${vm_subnet_prefix}|g" "${K8_DIR}/infrastructure/metallb/ip-pool.yaml"
+        rm -f "${K8_DIR}/infrastructure/metallb/ip-pool.yaml.bak"
+      fi
+
+      # Patch Technitium DNS service (fixed LoadBalancer IP)
+      if [[ -f "${K8_DIR}/platform/technitium/service-dns.yaml" ]]; then
+        sed -i.bak "s|${default_prefix}|${vm_subnet_prefix}|g" "${K8_DIR}/platform/technitium/service-dns.yaml"
+        rm -f "${K8_DIR}/platform/technitium/service-dns.yaml.bak"
+      fi
+
+      # Patch GitLab SSH service (fixed LoadBalancer IP)
+      if [[ -f "${K8_DIR}/services/gitlab-ce/service-ssh.yaml" ]]; then
+        sed -i.bak "s|${default_prefix}|${vm_subnet_prefix}|g" "${K8_DIR}/services/gitlab-ce/service-ssh.yaml"
+        rm -f "${K8_DIR}/services/gitlab-ce/service-ssh.yaml.bak"
+      fi
+
+      log_success "All files adapted to subnet ${vm_subnet_prefix}.0/24"
     fi
     log_success "VM IP: $VM_IP"
 
@@ -1194,7 +1239,7 @@ install_phase_2() {
     ensure_namespace "portainer"
 
     if [[ -d "${K8_DIR}/platform/portainer" ]]; then
-      helm_install_if_needed "portainer" "${K8_DIR}/platform/portainer" "portainer"
+      helm_install_if_needed "portainer" "${K8_DIR}/platform/portainer" "portainer" --set "domain=${BASE_DOMAIN}"
       wait_for_pods "portainer" 120
       log_success "Portainer installed"
     else
@@ -1563,6 +1608,32 @@ install_phase_3() {
     log_info "Alloy already installed, skipping"
   fi
 
+  # --- Mirror kube-state-metrics + node-exporter images ---
+  if ! component_is_installed "PHASE3_MIRROR" "$STATE_FILE"; then
+    if command -v crane &>/dev/null; then
+      log_step "Mirroring monitoring images to local registry..."
+      local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+      local AK_ADMIN_PASS
+      AK_ADMIN_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get -field=admin_password secret/artifact-keeper/app 2>/dev/null) || true
+      if [[ -n "${AK_ADMIN_PASS:-}" ]]; then
+        crane auth login "artifacts.${LOCAL_REGISTRY}" -u admin -p "${AK_ADMIN_PASS}" --insecure 2>/dev/null
+        crane copy --platform linux/arm64 --insecure \
+          "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0" \
+          "artifacts.${LOCAL_REGISTRY}/docker-local/registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0-arm64" 2>/dev/null && \
+          log_success "  Mirrored kube-state-metrics" || log_warn "  Failed to mirror kube-state-metrics"
+        crane copy --platform linux/arm64 --insecure \
+          "quay.io/prometheus/node-exporter:v1.10.2" \
+          "artifacts.${LOCAL_REGISTRY}/docker-local/quay.io/prometheus/node-exporter:v1.10.2-arm64" 2>/dev/null && \
+          log_success "  Mirrored node-exporter" || log_warn "  Failed to mirror node-exporter"
+      else
+        log_warn "Could not retrieve artifact-keeper password — skipping image mirror"
+      fi
+    else
+      log_warn "crane not found — skipping monitoring image mirror"
+    fi
+    mark_component_installed "PHASE3_MIRROR" "$STATE_FILE"
+  fi
+
   # --- 3.5 kube-state-metrics ---
   if ! component_is_installed "KUBE_STATE_METRICS" "$STATE_FILE"; then
     log_step "3.5 — kube-state-metrics"
@@ -1605,10 +1676,7 @@ install_phase_3() {
     ensure_namespace "monitoring"
 
     if [[ -d "${K8_DIR}/monitoring/grafana" ]]; then
-      # Create dashboard configmaps if they don't exist (normally provided by kube-state-metrics)
-      kubectl create configmap grafana-dashboards-kubernetes -n monitoring 2>/dev/null || true
-
-      local grafana_args=()
+      local grafana_args=(--set "domain=${BASE_DOMAIN}")
       if [[ -n "${GRAFANA_ADMIN_PASSWORD:-}" ]]; then
         grafana_args+=(--set "grafana.adminPassword=${GRAFANA_ADMIN_PASSWORD}")
       fi
@@ -1812,7 +1880,7 @@ install_phase_5() {
       token = User.find_by_username('root').personal_access_tokens.create!(
         name: 'runner-setup-$(date +%s)',
         scopes: ['api', 'create_runner'],
-        expires_at: 1.hour.from_now
+        expires_at: 1.day.from_now
       )
       puts token.token
     " 2>/dev/null | tail -1)
@@ -1823,9 +1891,10 @@ install_phase_5() {
       return 0
     fi
 
-    # Register instance runner via API
+    # Register instance runner via API (use internal URL to avoid TLS cert issues)
     log_info "Registering instance runner..."
-    local runner_response=$(curl -sk --request POST "https://gitlab.${GITLAB_DOMAIN}/api/v4/user/runners" \
+    local runner_response=$(kubectl exec -n gitlab gitlab-0 -- curl -s \
+      --request POST "http://localhost/api/v4/user/runners" \
       --header "PRIVATE-TOKEN: ${pat}" \
       --form "runner_type=instance_type" \
       --form "description=k8s-runner" \
@@ -1834,7 +1903,8 @@ install_phase_5() {
     local runner_token=$(echo "$runner_response" | jq -r '.token // empty' 2>/dev/null)
 
     if [[ -z "$runner_token" ]]; then
-      log_warn "Runner registration failed. Register manually later."
+      log_warn "Runner registration failed. Response: ${runner_response}"
+      log_info "Register manually later: ./install.sh phase 5"
       mark_phase_complete 5 "$STATE_FILE"
       return 0
     fi
@@ -1848,6 +1918,12 @@ install_phase_5() {
     log_step "Deploying GitLab Runner..."
     ensure_namespace "gitlab-runner"
     ensure_namespace "gitlab-runner-jobs"
+
+    # Create runner secret (required by Helm chart)
+    kubectl create secret generic gitlab-runner-secret -n gitlab-runner \
+      --from-literal=runner-registration-token="" \
+      --from-literal=runner-token="${runner_token}" 2>/dev/null || true
+
     helm_install_if_needed "gitlab-runner" "${K8_DIR}/services/gitlab-ce/runner" "gitlab-runner"
     wait_for_pods "gitlab-runner" 60
     log_success "GitLab Runner deployed with Kubernetes executor"
@@ -1860,7 +1936,11 @@ install_phase_5() {
   log_success "Phase 5 complete"
   echo ""
   echo -e "  ${BOLD}GitLab CE:${NC}     https://gitlab.${GITLAB_DOMAIN} (root)"
-  echo -e "  ${BOLD}GitLab SSH:${NC}    192.168.64.202:22"
+  local _ssh_first="${METALLB_IP_RANGE%%-*}"
+  local _ssh_base="${_ssh_first%.*}"
+  local _ssh_last="${_ssh_first##*.}"
+  local _ssh_ip="${_ssh_base}.$((_ssh_last + 2))"
+  echo -e "  ${BOLD}GitLab SSH:${NC}    ${_ssh_ip}:22"
   echo -e "  ${BOLD}GitLab Runner:${NC} k8s-runner (Kubernetes executor)"
   echo -e "  ${BOLD}Job Namespace:${NC} gitlab-runner-jobs"
   echo ""
@@ -1959,7 +2039,7 @@ GCEOF
     log_step "Installing kpack v0.17.0..."
     # Apply twice: first pass creates CRDs, second pass creates resources that depend on them
     kubectl apply --server-side --force-conflicts \
-      -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.0/release-0.17.0.yaml 2>&1 | tail -3 || true
+      -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.0/release-0.17.0.yaml 2>/dev/null || true
     sleep 5
     kubectl apply --server-side --force-conflicts \
       -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.0/release-0.17.0.yaml 2>&1 | tail -3
@@ -2547,7 +2627,7 @@ install_phase_7() {
         -o "${BUILD_DIR}/broker" . 2>&1 | tail -1
 
       local BROKER_REGISTRY="${REGISTRY:-artifactory.cfapps.cool}/docker-local"
-      local BROKER_IMAGE="${BROKER_REGISTRY}/cf-service-broker:1.3.0-arm64"
+      local BROKER_IMAGE="${BROKER_REGISTRY}/cf-service-broker:1.3.1-arm64"
       local BASE_IMAGE="gcr.io/distroless/static:nonroot"
       local TMPDIR_IMG LAYER
       TMPDIR_IMG=$(mktemp -d)

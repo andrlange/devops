@@ -10,7 +10,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`portainer.development.cfapps.cool`)
+    - match: Host(`portainer.{{ .Values.domain | default "development.cfapps.cool" }}`)
       kind: Rule
       services:
         - name: portainer

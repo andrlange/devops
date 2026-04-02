@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('User Management')}"></head>
+<body>
+<div class="app-container">
+    <nav th:replace="~{fragments/layout :: sidebar}"></nav>
+    <div class="main-wrapper">
+        <header th:replace="~{fragments/layout :: topbar}"></header>
+        <main class="main-content">
+
+            <div th:if="${success}" class="alert alert-success alert-dismissible fade show"><span th:text="${success}"></span><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+            <div th:if="${error}" class="alert alert-danger alert-dismissible fade show"><span th:text="${error}"></span><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div></div>
+                <a th:href="@{/admin/users/new}" class="btn btn-sm btn-spring-green">
+                    <i class="bi bi-person-plus me-1"></i> Create User
+                </a>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr><th>Username</th><th>Display Name</th><th>Role</th><th>Access</th><th>Enabled</th><th>Actions</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="entry : ${users}">
+                            <td class="mono" th:text="${entry.user.username}"></td>
+                            <td th:text="${entry.user.displayName}"></td>
+                            <td>
+                                <span class="badge" th:classappend="${entry.user.role.name() == 'ADMIN' ? 'bg-warning text-dark' : 'bg-info'}" th:text="${entry.user.role}"></span>
+                            </td>
+                            <td>
+                                <div th:if="${entry.user.role.name() == 'ADMIN'}" class="small text-muted">All orgs/spaces</div>
+                                <div th:unless="${entry.user.role.name() == 'ADMIN'}" class="d-flex flex-wrap gap-1">
+                                    <span th:each="orgName : ${entry.orgNames}" class="badge bg-dark border" style="font-size:9px;">
+                                        <i class="bi bi-building me-1" style="color:#e8a735;"></i><span th:text="${orgName}"></span>
+                                    </span>
+                                    <span th:each="spaceName : ${entry.spaceNames}" class="badge bg-dark border" style="font-size:9px;">
+                                        <i class="bi bi-layers me-1" style="color:#4a9eff;"></i><span th:text="${spaceName}"></span>
+                                    </span>
+                                    <span th:if="${#lists.isEmpty(entry.orgNames) && #lists.isEmpty(entry.spaceNames)}" class="text-muted small">No access</span>
+                                </div>
+                            </td>
+                            <td>
+                                <span th:if="${entry.user.enabled}" class="health-ok"><i class="bi bi-check-circle"></i></span>
+                                <span th:unless="${entry.user.enabled}" class="health-error"><i class="bi bi-x-circle"></i></span>
+                            </td>
+                            <td>
+                                <div class="d-flex gap-1">
+                                    <a th:href="@{/admin/users/{id}/edit(id=${entry.user.id})}" class="btn btn-sm btn-outline-secondary" title="Edit"><i class="bi bi-pencil"></i></a>
+                                    <a th:href="@{/admin/users/{id}/assignments(id=${entry.user.id})}" class="btn btn-sm btn-outline-secondary" title="Assignments"><i class="bi bi-diagram-3"></i></a>
+                                    <form th:action="@{/admin/users/{id}/delete(id=${entry.user.id})}" method="post" class="d-inline"
+                                          onsubmit="return confirm('Delete this user?')">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+        </main>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

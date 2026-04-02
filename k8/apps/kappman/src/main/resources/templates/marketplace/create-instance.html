@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Create Service Instance')}"></head>
+<body>
+<div class="app-container">
+    <nav th:replace="~{fragments/layout :: sidebar}"></nav>
+    <div class="main-wrapper">
+        <header th:replace="~{fragments/layout :: topbar}"></header>
+        <main class="main-content">
+
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a th:href="@{/marketplace}">Marketplace</a></li>
+                    <li class="breadcrumb-item active" th:text="${offering?.name}"></li>
+                </ol>
+            </nav>
+
+            <div class="content-card">
+                <h6>Create Service Instance</h6>
+                <form th:action="@{/services}" method="post">
+                    <div class="mb-3">
+                        <label class="form-label">Instance Name</label>
+                        <input type="text" class="form-control" name="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Plan</label>
+                        <select class="form-select" name="planGuid" required>
+                            <option th:each="plan : ${plans}" th:value="${plan.guid}" th:text="${plan.name + ' — ' + plan.description}"></option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Space</label>
+                        <select class="form-select" name="spaceGuid" required>
+                            <option th:each="space : ${spaces}" th:value="${space.guid}" th:text="${space.name}"></option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-spring-green">Create</button>
+                    <a th:href="@{/marketplace}" class="btn btn-secondary ms-2">Cancel</a>
+                </form>
+            </div>
+
+        </main>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

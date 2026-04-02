@@ -1,0 +1,46 @@
+<h6 xmlns:th="http://www.thymeleaf.org">Environment Variables</h6>
+<div th:if="${envVars == null || envVars.isEmpty()}" class="text-muted small">No environment variables set</div>
+<table class="table table-sm" th:unless="${envVars == null || envVars.isEmpty()}" style="table-layout:fixed;width:100%;">
+    <tbody>
+        <tr th:each="entry, stat : ${envVars}">
+            <td class="mono" style="width:200px;word-break:break-all;" th:text="${entry.key}"></td>
+            <td style="word-break:break-all;">
+                <th:block th:if="${#strings.contains(entry.key.toString().toUpperCase(), 'PASSWORD') or #strings.contains(entry.key.toString().toUpperCase(), 'SECRET') or #strings.contains(entry.key.toString().toUpperCase(), 'TOKEN')}">
+                    <span class="mono text-muted env-masked" th:id="'env-masked-' + ${stat.index}">****</span>
+                    <span class="mono text-muted env-value d-none" th:id="'env-value-' + ${stat.index}" th:text="${entry.value}"></span>
+                    <button type="button" class="btn btn-sm border-0 p-0 ms-2 text-muted" th:onclick="'toggleEnvValue(' + ${stat.index} + ')'" title="Show/Hide">
+                        <i class="bi bi-eye" th:id="'env-icon-' + ${stat.index}"></i>
+                    </button>
+                </th:block>
+                <th:block th:unless="${#strings.contains(entry.key.toString().toUpperCase(), 'PASSWORD') or #strings.contains(entry.key.toString().toUpperCase(), 'SECRET') or #strings.contains(entry.key.toString().toUpperCase(), 'TOKEN')}">
+                    <span class="mono text-muted" th:text="${entry.value}"></span>
+                </th:block>
+            </td>
+        </tr>
+    </tbody>
+</table>
+<form class="d-flex gap-2 mt-2"
+      th:attr="hx-post=@{/apps/{guid}/env(guid=${appGuid})}"
+      hx-target="#env-vars-card" hx-swap="innerHTML">
+    <input type="text" class="form-control form-control-sm" name="key" placeholder="KEY" required style="width:150px">
+    <input type="text" class="form-control form-control-sm" name="value" placeholder="value" required>
+    <button type="submit" class="btn btn-sm btn-outline-spring-green">Set</button>
+</form>
+<script>
+function toggleEnvValue(idx) {
+    var masked = document.getElementById('env-masked-' + idx);
+    var value = document.getElementById('env-value-' + idx);
+    var icon = document.getElementById('env-icon-' + idx);
+    if (value.classList.contains('d-none')) {
+        value.classList.remove('d-none');
+        masked.classList.add('d-none');
+        icon.classList.remove('bi-eye');
+        icon.classList.add('bi-eye-slash');
+    } else {
+        value.classList.add('d-none');
+        masked.classList.remove('d-none');
+        icon.classList.remove('bi-eye-slash');
+        icon.classList.add('bi-eye');
+    }
+}
+</script>

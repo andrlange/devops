@@ -36,6 +36,7 @@ tar czf "${DIST_DIR}/stack.tgz" \
   --exclude='.install-state' \
   --exclude='credentials.md' \
   --exclude='.superpowers' \
+  --exclude='k8/docs/superpowers' \
   --exclude='source' \
   --exclude='artifactory' \
   --exclude='otel' \

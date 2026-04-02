@@ -10,7 +10,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`grafana.development.cfapps.cool`)
+    - match: Host(`grafana.{{ .Values.domain | default "development.cfapps.cool" }}`)
       kind: Rule
       services:
         - name: grafana

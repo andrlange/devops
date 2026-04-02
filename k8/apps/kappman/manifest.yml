@@ -1,0 +1,17 @@
+applications:
+- name: kappman
+  memory: 1G
+  instances: 1
+  path: build/libs/kappman-0.0.1-SNAPSHOT.jar
+  routes:
+  - route: kappman.app.cfapps.cool
+  buildpacks:
+  - paketo-buildpacks/java
+  env:
+    BP_JVM_VERSION: "25"
+    BPL_SPRING_CLOUD_BINDINGS_DISABLED: "true"
+    CF_API_URL: https://api.app.cfapps.cool
+    CF_USERNAME: cf-admin
+    CF_SKIP_SSL: "true"
+  services:
+  - kappman-db

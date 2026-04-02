@@ -118,5 +118,5 @@ print_banner() {
 BANNER
   printf "${NC}"
   printf "${BOLD}  K8s DevOps Stack — Distribution Installer${NC}\n"
-  printf "${DIM}  Inspired by Pivotal Labs' Iteration Zero${NC}\n\n"
+  printf "${DIM}  Inspired by Pivotals' Patform Approach${NC}\n\n"
 }

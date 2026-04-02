@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head(${app?.name ?: 'Application'})}"></head>
+<body>
+<div class="app-container">
+    <nav th:replace="~{fragments/layout :: sidebar}"></nav>
+    <div class="main-wrapper">
+        <header th:replace="~{fragments/layout :: topbar}"></header>
+        <main class="main-content" style="padding-right:32px;">
+
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a th:href="@{/apps}">Applications</a></li>
+                    <li class="breadcrumb-item active" th:text="${app?.name}"></li>
+                </ol>
+            </nav>
+
+            <!-- App Info + Actions -->
+            <div class="content-card mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <h6 class="mb-1" th:text="${app?.name}"></h6>
+                        <span class="mono text-muted small" th:text="${app?.guid}"></span>
+                        <div class="mt-1 small">
+                            <a th:href="@{/orgs/{guid}(guid=${orgGuid})}" class="text-decoration-none">
+                                <i class="bi bi-building me-1" style="color:#e8a735;"></i><span style="color:#e8a735;" th:text="${orgName}"></span>
+                            </a>
+                            <span class="text-muted mx-1">/</span>
+                            <a th:href="@{/orgs/{og}/spaces/{sg}(og=${orgGuid}, sg=${spaceGuid})}" class="text-decoration-none">
+                                <i class="bi bi-layers me-1" style="color:#4a9eff;"></i><span style="color:#4a9eff;" th:text="${spaceName}"></span>
+                            </a>
+                        </div>
+                    </div>
+                    <div id="status-badge">
+                        <th:block th:replace="~{app/fragments/status-badge}"></th:block>
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2 mb-3">
+                    <button class="btn btn-sm btn-outline-spring-green"
+                            th:attr="hx-post=@{/apps/{guid}/start(guid=${app.guid})}"
+                            hx-target="#status-badge" hx-swap="innerHTML"
+                            th:disabled="${app?.state == 'STARTED'}">
+                        <i class="bi bi-play-fill"></i> Start
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary"
+                            th:attr="hx-post=@{/apps/{guid}/stop(guid=${app.guid})}"
+                            hx-target="#status-badge" hx-swap="innerHTML"
+                            th:disabled="${app?.state == 'STOPPED'}">
+                        <i class="bi bi-stop-fill"></i> Stop
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary"
+                            th:attr="hx-post=@{/apps/{guid}/restart(guid=${app.guid})}"
+                            hx-target="#status-badge" hx-swap="innerHTML">
+                        <i class="bi bi-arrow-clockwise"></i> Restart
+                    </button>
+                    <form th:if="${isAdmin}" th:action="@{/apps/{guid}/delete(guid=${app.guid})}" method="post" class="d-inline ms-auto"
+                          onsubmit="return confirm('Delete this application?')">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                            <i class="bi bi-trash"></i> Delete
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Instances -->
+            <div class="content-card mb-3" id="instances-card">
+                <h6>Instances</h6>
+                <div th:each="proc : ${processes}" th:if="${proc.type == 'web'}">
+                    <div class="mb-2">
+                        <span class="text-muted">Instances:</span> <span th:text="${proc.instances}"></span>
+                        <span class="text-muted ms-3">Memory:</span> <span th:text="${proc.memoryInMb + 'MB'}"></span>
+                        <span class="text-muted ms-3">Disk:</span> <span th:text="${proc.diskInMb + 'MB'}"></span>
+                    </div>
+                    <form class="d-flex gap-2 align-items-center">
+                        <input type="number" class="form-control form-control-sm" style="width:80px" name="instances"
+                               th:value="${proc.instances}" min="0" max="10">
+                        <button type="button" class="btn btn-sm btn-outline-spring-green"
+                                th:attr="hx-post=@{/apps/{guid}/scale(guid=${app.guid})}"
+                                hx-target="#instances-card" hx-swap="innerHTML"
+                                hx-include="[name='instances']">
+                            Scale
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Routes -->
+            <div class="content-card mb-3">
+                <h6>Routes</h6>
+                <div th:if="${#lists.isEmpty(routes)}" class="text-muted small">No routes mapped</div>
+                <div th:each="route : ${routes}" class="mb-1">
+                    <i class="bi bi-globe me-1 text-muted"></i>
+                    <a th:href="'https://' + ${route.url}" target="_blank" class="mono text-spring-green" th:text="${route.url}"></a>
+                </div>
+            </div>
+
+            <!-- Environment Variables -->
+            <div class="content-card mb-3" id="env-vars-card"
+                 th:attr="hx-get=@{/apps/{guid}/env(guid=${app.guid})}"
+                 hx-trigger="load" hx-swap="innerHTML">
+                <h6>Environment Variables</h6>
+                <div class="text-muted small">Loading...</div>
+            </div>
+
+            <!-- Bound Services -->
+            <div class="content-card mb-3">
+                <h6>Bound Services</h6>
+                <div th:if="${#lists.isEmpty(bindings)}" class="text-muted small">No services bound</div>
+                <div th:each="entry : ${bindings}" class="d-flex align-items-center gap-2 mb-2 py-1 border-bottom" style="border-color:var(--spring-border) !important;">
+                    <i class="bi bi-plug me-1" style="color:#c678dd;"></i>
+                    <span th:text="${entry.serviceName}"></span>
+                    <span class="badge bg-dark border" style="font-size:9px;" th:text="${entry.offeringName}"></span>
+                    <span class="badge bg-dark border" style="font-size:9px;"><i class="bi bi-tag me-1"></i><span th:text="${entry.planName}"></span></span>
+                </div>
+            </div>
+
+            <!-- Logs -->
+            <div class="content-card mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="mb-0">Recent Logs</h6>
+                    <button class="btn btn-sm btn-outline-secondary"
+                            th:attr="hx-get=@{/apps/{guid}/logs(guid=${app.guid})}"
+                            hx-target="#log-content" hx-swap="innerHTML">
+                        <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+                    </button>
+                </div>
+                <div class="log-viewer" id="log-content"
+                     th:attr="hx-get=@{/apps/{guid}/logs(guid=${app.guid})}"
+                     hx-trigger="load, every 30s" hx-swap="innerHTML">
+                    Loading logs...
+                </div>
+            </div>
+
+        </main>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

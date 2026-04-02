@@ -770,7 +770,9 @@ print_endpoints() {
     # SSH services
     if kube get namespace gitlab &>/dev/null 2>&1; then
         printf "${BOLD}SSH Services${NC}\n"
-        row "GitLab SSH" "ssh git@192.168.64.202"
+        local gitlab_ssh_ip
+        gitlab_ssh_ip=$(kubectl get svc gitlab-ssh -n gitlab -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "unknown")
+        row "GitLab SSH" "ssh git@${gitlab_ssh_ip}"
         echo
     fi
 

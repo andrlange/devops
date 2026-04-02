@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('User Assignments')}"></head>
+<body>
+<div class="app-container">
+    <nav th:replace="~{fragments/layout :: sidebar}"></nav>
+    <div class="main-wrapper">
+        <header th:replace="~{fragments/layout :: topbar}"></header>
+        <main class="main-content">
+
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a th:href="@{/admin/users}">Users</a></li>
+                    <li class="breadcrumb-item active" th:text="${user?.displayName + ' — Assignments'}"></li>
+                </ol>
+            </nav>
+
+            <div class="row g-3">
+                <!-- Org Assignments -->
+                <div class="col-md-6">
+                    <div class="content-card">
+                        <h6>Organization Assignments</h6>
+                        <p class="text-muted small mb-3">Activating an org also assigns all its spaces. Removing an org removes its spaces.</p>
+
+                        <div th:each="org : ${allOrgs}" class="d-flex justify-content-between align-items-center mb-2 py-1 border-bottom" style="border-color: var(--spring-border) !important;">
+                            <div>
+                                <i class="bi bi-building me-1" style="color:#e8a735;"></i>
+                                <span th:text="${org.name}"></span>
+                            </div>
+                            <div>
+                                <form th:if="${assignedOrgGuids.contains(org.guid)}" th:action="@{/admin/users/{id}/assignments/orgs/{orgGuid}/delete(id=${user.id}, orgGuid=${org.guid})}" method="post" class="d-inline">
+                                    <button type="submit" class="btn btn-sm btn-spring-green"><i class="bi bi-check-lg"></i></button>
+                                </form>
+                                <form th:unless="${assignedOrgGuids.contains(org.guid)}" th:action="@{/admin/users/{id}/assignments/orgs(id=${user.id})}" method="post" class="d-inline">
+                                    <input type="hidden" name="orgGuid" th:value="${org.guid}">
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-plus-lg"></i></button>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div th:if="${#lists.isEmpty(allOrgs)}" class="text-muted small">No organizations available</div>
+                    </div>
+                </div>
+
+                <!-- Space Assignments -->
+                <div class="col-md-6">
+                    <div class="content-card">
+                        <h6>Space Assignments</h6>
+                        <p class="text-muted small mb-3">Activating a space also assigns its parent org.</p>
+
+                        <div th:each="entry : ${spacesWithOrg}" class="d-flex justify-content-between align-items-center mb-2 py-1 border-bottom" style="border-color: var(--spring-border) !important;">
+                            <div>
+                                <i class="bi bi-layers me-1" style="color:#4a9eff;"></i>
+                                <span th:text="${entry.space.name}"></span>
+                                <span class="text-muted small ms-1">
+                                    (<i class="bi bi-building me-1" style="font-size:10px;color:#e8a735;"></i><span style="color:#e8a735;" th:text="${entry.orgName}"></span>)
+                                </span>
+                            </div>
+                            <div>
+                                <form th:if="${assignedSpaceGuids.contains(entry.space.guid)}" th:action="@{/admin/users/{id}/assignments/spaces/{spaceGuid}/delete(id=${user.id}, spaceGuid=${entry.space.guid})}" method="post" class="d-inline">
+                                    <button type="submit" class="btn btn-sm btn-spring-green"><i class="bi bi-check-lg"></i></button>
+                                </form>
+                                <form th:unless="${assignedSpaceGuids.contains(entry.space.guid)}" th:action="@{/admin/users/{id}/assignments/spaces(id=${user.id})}" method="post" class="d-inline">
+                                    <input type="hidden" name="spaceGuid" th:value="${entry.space.guid}">
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-plus-lg"></i></button>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div th:if="${#lists.isEmpty(spacesWithOrg)}" class="text-muted small">No spaces available</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-3">
+                <a th:href="@{/admin/users}" class="btn btn-secondary"><i class="bi bi-arrow-left me-1"></i> Back to Users</a>
+            </div>
+
+        </main>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

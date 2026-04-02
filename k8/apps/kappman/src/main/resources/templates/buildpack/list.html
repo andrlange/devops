@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Buildpacks')}"></head>
+<body>
+<div class="app-container">
+    <nav th:replace="~{fragments/layout :: sidebar}"></nav>
+    <div class="main-wrapper">
+        <header th:replace="~{fragments/layout :: topbar}"></header>
+        <main class="main-content">
+
+            <div th:if="${#lists.isEmpty(buildpacks)}" class="empty-state">
+                <i class="bi bi-bricks d-block"></i>
+                <p>No buildpacks found</p>
+            </div>
+
+            <div th:unless="${#lists.isEmpty(buildpacks)}">
+                <div th:each="entry, stat : ${buildpacks}" class="mb-2">
+                    <!-- Buildpack Row (collapsible) -->
+                    <div class="d-flex align-items-center p-2 rounded content-card mb-0"
+                         style="cursor:pointer;"
+                         data-bs-toggle="collapse" th:data-bs-target="'#bp-' + ${stat.index}">
+                        <i class="bi bi-chevron-right me-2 text-muted" style="transition:transform 200ms;width:16px;"></i>
+                        <span class="text-muted me-3" style="width:20px;" th:text="${entry.buildpack.position}"></span>
+                        <i class="bi bi-bricks me-2 text-spring-green"></i>
+                        <span class="text-spring-green me-3" th:text="${entry.buildpack.name}"></span>
+                        <span class="mono text-muted small me-3" th:text="${entry.buildpack.stack ?: '-'}"></span>
+                        <span th:if="${entry.appCount > 0}" class="badge badge-started">
+                            <i class="bi bi-box me-1"></i><span th:text="${entry.appCount} + ' apps'"></span>
+                        </span>
+                        <span th:if="${entry.appCount == 0}" class="badge bg-dark border text-muted">
+                            no apps
+                        </span>
+                    </div>
+
+                    <!-- App List (collapsed by default) -->
+                    <div class="collapse ms-5 mt-1 mb-1" th:id="'bp-' + ${stat.index}">
+                        <div th:if="${entry.appCount == 0}" class="text-muted small p-2">
+                            No applications using this buildpack
+                        </div>
+                        <div th:unless="${entry.appCount == 0}" class="table-responsive">
+                            <table class="table table-hover table-sm mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Application</th>
+                                        <th>State</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="app : ${entry.apps}">
+                                        <td>
+                                            <a th:href="@{/apps/{guid}(guid=${app.guid})}" class="text-decoration-none text-spring-green">
+                                                <i class="bi bi-box me-1"></i>
+                                                <span th:text="${app.name}"></span>
+                                            </a>
+                                        </td>
+                                        <td>
+                                            <span class="badge" th:classappend="${app.state == 'STARTED' ? 'badge-started' : (app.state == 'STOPPED' ? 'badge-stopped' : 'badge-staging')}" th:text="${app.state}"></span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

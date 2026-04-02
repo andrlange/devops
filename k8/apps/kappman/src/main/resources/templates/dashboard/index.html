@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head th:replace="~{fragments/layout :: head('Dashboard')}"></head>
+<body>
+<div class="app-container">
+    <nav th:replace="~{fragments/layout :: sidebar}"></nav>
+    <div class="main-wrapper">
+        <header th:replace="~{fragments/layout :: topbar}"></header>
+        <main class="main-content">
+
+            <div th:if="${!cfConfigured}" class="alert alert-warning mb-4">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                CF API is not configured. Set <code>CF_PASSWORD</code> environment variable to connect to Korifi.
+            </div>
+
+            <!-- Stats Cards with Top 10 -->
+            <div class="row g-3 mb-4">
+                <!-- Organizations -->
+                <div class="col-6 col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-value" th:text="${orgCount}">0</div>
+                        <div class="stat-label">Organizations</div>
+                        <div class="mt-2" th:unless="${#lists.isEmpty(topOrgs)}">
+                            <div th:each="org : ${topOrgs}" class="small text-start">
+                                <a th:href="@{/orgs/{guid}(guid=${org.guid})}" class="text-decoration-none" style="color:#e8a735;">
+                                    <i class="bi bi-building me-1" style="font-size:10px;"></i><span th:text="${org.name}"></span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Spaces -->
+                <div class="col-6 col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-value" th:text="${spaceCount}">0</div>
+                        <div class="stat-label">Spaces</div>
+                        <div class="mt-2" th:unless="${#lists.isEmpty(topSpaces)}">
+                            <div th:each="space : ${topSpaces}" class="small text-start">
+                                <a th:href="@{/spaces}" class="text-decoration-none" style="color:#4a9eff;">
+                                    <i class="bi bi-layers me-1" style="font-size:10px;"></i><span th:text="${space.name}"></span>
+                                </a>
+                                <span class="text-muted" style="font-size:10px;" th:text="' (' + ${space.orgName} + ')'"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Applications -->
+                <div class="col-6 col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-value" th:text="${appCount}">0</div>
+                        <div class="stat-label">Applications</div>
+                        <div class="mt-2" th:unless="${#lists.isEmpty(topApps)}">
+                            <div th:each="app : ${topApps}" class="small text-start d-flex justify-content-between">
+                                <a th:href="@{/apps/{guid}(guid=${app.guid})}" class="text-decoration-none text-spring-green text-truncate">
+                                    <i class="bi bi-box me-1" style="font-size:10px;"></i><span th:text="${app.name}"></span>
+                                </a>
+                                <span class="badge ms-1" style="font-size:9px;"
+                                      th:classappend="${app.state == 'STARTED' ? 'badge-started' : 'badge-stopped'}"
+                                      th:text="${app.state}"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Services -->
+                <div class="col-6 col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-value" th:text="${serviceCount}">0</div>
+                        <div class="stat-label">Services</div>
+                        <div class="mt-2" th:unless="${#lists.isEmpty(topServices)}">
+                            <div th:each="svc : ${topServices}" class="small text-start">
+                                <a th:href="@{/services}" class="text-decoration-none" style="color:#c678dd;">
+                                    <i class="bi bi-plug me-1" style="font-size:10px;"></i><span th:text="${svc.name}"></span>
+                                </a>
+                                <span th:if="${svc.type == 'managed'}" class="text-muted" style="font-size:10px;" title="Provisioned via Service Broker">broker</span>
+                                <span th:if="${svc.type == 'user_provided'}" class="text-muted" style="font-size:10px;">user</span>
+                                <span th:if="${svc.type != 'managed' and svc.type != 'user_provided'}" class="text-muted" style="font-size:10px;" th:text="${svc.type}"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resource Consumption -->
+            <div class="row g-3 mb-4">
+                <div class="col-12">
+                    <div class="content-card">
+                        <h6>Resource Consumption</h6>
+                        <div class="row g-3">
+                            <div class="col-md-2 col-4">
+                                <div class="text-center">
+                                    <div class="stat-value" style="font-size:22px;" th:text="${totalInstances}">0</div>
+                                    <div class="stat-label">Instances</div>
+                                </div>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <div class="text-center">
+                                    <div class="stat-value" style="font-size:22px;" th:text="${totalMemoryGb} + ' GB'">0 GB</div>
+                                    <div class="stat-label">Memory</div>
+                                    <div class="text-muted" style="font-size:10px;" th:text="${totalMemoryMb} + ' MB'"></div>
+                                </div>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <div class="text-center">
+                                    <div class="stat-value" style="font-size:22px;" th:text="${totalDiskGb} + ' GB'">0 GB</div>
+                                    <div class="stat-label">Disk</div>
+                                    <div class="text-muted" style="font-size:10px;" th:text="${totalDiskMb} + ' MB'"></div>
+                                </div>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <div class="text-center">
+                                    <div class="stat-value" style="font-size:22px;color:#6db33f;" th:text="${runningApps}">0</div>
+                                    <div class="stat-label">Running</div>
+                                </div>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <div class="text-center">
+                                    <div class="stat-value" style="font-size:22px;color:#e06c75;" th:text="${stoppedApps}">0</div>
+                                    <div class="stat-label">Stopped</div>
+                                </div>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <div class="text-center">
+                                    <div class="stat-value" style="font-size:22px;" th:text="${serviceCount}">0</div>
+                                    <div class="stat-label">Services</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row g-3">
+                <!-- Korifi Health -->
+                <div class="col-md-6">
+                    <div class="content-card">
+                        <h6>Korifi Health</h6>
+                        <div th:if="${cfApiHealthy}">
+                            <div class="mb-2">
+                                <span class="health-dot ok"></span>
+                                <span>CF API</span>
+                                <span class="text-muted ms-2 mono" th:if="${cfInfo != null}" th:text="${cfInfo.name + ' ' + cfInfo.version}"></span>
+                            </div>
+                            <div class="mb-2">
+                                <span class="health-dot ok"></span>
+                                <span>Gateway</span>
+                            </div>
+                        </div>
+                        <div th:unless="${cfApiHealthy}">
+                            <div class="mb-2">
+                                <span class="health-dot error"></span>
+                                <span class="health-error">CF API unreachable</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Activity -->
+                <div class="col-md-6">
+                    <div class="content-card">
+                        <h6>Recent Activity</h6>
+                        <div th:if="${#lists.isEmpty(recentActivity)}" class="text-muted small">
+                            No recent activity
+                        </div>
+                        <div th:each="entry : ${recentActivity}" class="mb-1 small">
+                            <span class="text-muted mono" th:text="${#temporals.format(entry.createdAt, 'HH:mm')}"></span>
+                            <span th:text="${entry.action}"></span>
+                            <span class="text-muted" th:text="${entry.resourceType}"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

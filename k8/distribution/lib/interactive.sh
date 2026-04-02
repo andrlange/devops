@@ -81,7 +81,7 @@ ask_choice() {
     if [[ "${options[$i]}" == "$default" ]]; then
       marker=" ${DIM}(default)${NC}"
     fi
-    printf "    ${CYAN}%d)${NC} %s%s\n" "$((i + 1))" "${options[$i]}" "$marker" >&2
+    printf "    ${CYAN}%d)${NC} %s%b\n" "$((i + 1))" "${options[$i]}" "$marker" >&2
   done
   printf "  ${BOLD}Choice${NC} ${DIM}[1]${NC}: " >&2
 

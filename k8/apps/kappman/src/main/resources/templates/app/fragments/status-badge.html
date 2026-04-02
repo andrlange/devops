@@ -1,0 +1,5 @@
+<span xmlns:th="http://www.thymeleaf.org"
+      class="badge"
+      th:classappend="${app?.state == 'STARTED' ? 'badge-started' : (app?.state == 'STOPPED' ? 'badge-stopped' : 'badge-staging')}"
+      th:text="${app?.state ?: 'UNKNOWN'}">
+</span>

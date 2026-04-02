@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-kubernetes
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  k8s-operations.json: |-
+{{ .Files.Get "dashboards/k8s-operations.json" | indent 4 }}

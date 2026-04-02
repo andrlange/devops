@@ -1,0 +1,16 @@
+kube-state-metrics:
+  image:
+    registry: artifactory.cfapps.cool
+    repository: docker-local/registry.k8s.io/kube-state-metrics/kube-state-metrics
+    tag: v2.18.0-arm64
+
+  imagePullSecrets:
+    - name: artifact-keeper-pull
+
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+    limits:
+      memory: 128Mi
+      cpu: 100m
