@@ -40,7 +40,7 @@ run_phase_9() {
 
     local BROKER_SRC="${INSTALL_DIR}/../services/cf-marketplace-broker/src"
     local BROKER_IMAGE="artifactory.cfapps.cool/docker-local/cf-marketplace-broker:1.0.0-arm64"
-    local BASE_IMAGE="gcr.io/distroless/static:nonroot"
+    local BASE_IMAGE="artifactory.cfapps.cool/docker-local/gcr.io/distroless/static:nonroot-arm64"
 
     if command -v go &>/dev/null && command -v crane &>/dev/null; then
       local BUILD_DIR
@@ -77,7 +77,7 @@ run_phase_9() {
 
     local EXISTING_BROKER_SRC="${INSTALL_DIR}/../services/cf-service-broker/src"
     local EXISTING_BROKER_IMAGE="artifactory.cfapps.cool/docker-local/cf-service-broker:1.4.0-arm64"
-    local BASE_IMAGE="gcr.io/distroless/static:nonroot"
+    local BASE_IMAGE="artifactory.cfapps.cool/docker-local/gcr.io/distroless/static:nonroot-arm64"
 
     if command -v go &>/dev/null && command -v crane &>/dev/null; then
       local BUILD_DIR

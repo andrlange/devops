@@ -5,6 +5,6 @@ RUN go mod download
 COPY src/ ./
 RUN CGO_ENABLED=0 go build -o /cf-marketplace-broker .
 
-FROM gcr.io/distroless/static:nonroot
+FROM artifactory.cfapps.cool/docker-local/gcr.io/distroless/static:nonroot-arm64
 COPY --from=build /cf-marketplace-broker /cf-marketplace-broker
 ENTRYPOINT ["/cf-marketplace-broker"]

@@ -65,7 +65,7 @@ func (p *PostgresAI) Provision(ctx context.Context, client *k8sclient.Client, na
 			},
 			"spec": map[string]interface{}{
 				"instances": int64(1),
-				"imageName": "timescale/timescaledb-ha:pg17",
+				"imageName": "artifactory.cfapps.cool/docker-local/timescale/timescaledb-ha:pg17-arm64",
 				"postgresql": map[string]interface{}{
 					"parameters": map[string]interface{}{
 						"max_connections":          "100",
