@@ -34,9 +34,47 @@
                             <option th:each="space : ${spaces}" th:value="${space.guid}" th:text="${space.name}"></option>
                         </select>
                     </div>
+
+                    <!-- Parameters (only for services that support them) -->
+                    <div class="mb-3" th:if="${catalogMetadata != null and catalogMetadata.containsKey('docsParameters')}">
+                        <label class="form-label">
+                            Parameters (JSON)
+                            <button type="button" class="btn btn-sm btn-link p-0 ms-1"
+                                    data-bs-toggle="modal" data-bs-target="#paramsDocsModal">
+                                <i class="bi bi-question-circle"></i>
+                            </button>
+                        </label>
+                        <textarea class="form-control font-monospace" name="parameters"
+                                  rows="5" placeholder='{"provider":"ollama","host":"192.168.64.1","port":11434}'></textarea>
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle me-1"></i>Click <i class="bi bi-question-circle"></i> for parameter format
+                        </small>
+                    </div>
+
                     <button type="submit" class="btn btn-spring-green">Create</button>
                     <a th:href="@{/marketplace}" class="btn btn-secondary ms-2">Cancel</a>
                 </form>
+            </div>
+
+            <!-- Parameters Documentation Modal -->
+            <div th:if="${catalogMetadata != null and catalogMetadata.containsKey('docsParameters')}"
+                 class="modal fade" id="paramsDocsModal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content" style="background: var(--spring-card); border-color: var(--spring-border);">
+                        <div class="modal-header border-secondary">
+                            <h5 class="modal-title">
+                                <i class="bi bi-code-square me-2"></i>
+                                Parameters — <span th:text="${offering?.name}"></span>
+                            </h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body" th:utext="${catalogMetadata.get('docsParameters')}">
+                        </div>
+                        <div class="modal-footer border-secondary">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
         </main>
