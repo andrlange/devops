@@ -18,6 +18,12 @@
                     <div class="content-card h-100">
                         <div class="d-flex justify-content-between align-items-start mb-2">
                             <h6 class="text-spring-green mb-0" th:text="${entry.offering.name}"></h6>
+                            <button th:if="${entry.catalogMetadata != null and entry.catalogMetadata.containsKey('docsOverview')}"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    data-bs-toggle="modal"
+                                    th:attr="data-bs-target='#docsModal-' + ${entry.offering.guid}">
+                                <i class="bi bi-info-circle"></i>
+                            </button>
                         </div>
                         <p class="text-muted small mb-3" th:text="${entry.offering.description}"></p>
 
@@ -50,6 +56,52 @@
                             </a>
                         </div>
                     </div>
+
+                    <!-- Documentation Modal -->
+                    <div th:if="${entry.catalogMetadata != null and entry.catalogMetadata.containsKey('docsOverview')}"
+                         class="modal fade" th:id="'docsModal-' + ${entry.offering.guid}" tabindex="-1">
+                        <div class="modal-dialog modal-lg">
+                            <div class="modal-content" style="background: var(--spring-card); border-color: var(--spring-border);">
+                                <div class="modal-header border-secondary">
+                                    <h5 class="modal-title">
+                                        <i class="bi bi-book me-2"></i>
+                                        <span th:text="${entry.catalogMetadata.getOrDefault('displayName', entry.offering.name)}"></span>
+                                    </h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <ul class="nav nav-tabs mb-3" role="tablist">
+                                        <li class="nav-item">
+                                            <button class="nav-link active" data-bs-toggle="tab"
+                                                    th:attr="data-bs-target='#overview-' + ${entry.offering.guid}" type="button">Overview</button>
+                                        </li>
+                                        <li class="nav-item" th:if="${entry.catalogMetadata.containsKey('docsParameters')}">
+                                            <button class="nav-link" data-bs-toggle="tab"
+                                                    th:attr="data-bs-target='#parameters-' + ${entry.offering.guid}" type="button">Parameters</button>
+                                        </li>
+                                        <li class="nav-item" th:if="${entry.catalogMetadata.containsKey('docsCredentials')}">
+                                            <button class="nav-link" data-bs-toggle="tab"
+                                                    th:attr="data-bs-target='#credentials-' + ${entry.offering.guid}" type="button">Credentials</button>
+                                        </li>
+                                    </ul>
+                                    <div class="tab-content">
+                                        <div class="tab-pane fade show active" th:id="'overview-' + ${entry.offering.guid}"
+                                             th:utext="${entry.catalogMetadata.get('docsOverview')}"></div>
+                                        <div th:if="${entry.catalogMetadata.containsKey('docsParameters')}"
+                                             class="tab-pane fade" th:id="'parameters-' + ${entry.offering.guid}"
+                                             th:utext="${entry.catalogMetadata.get('docsParameters')}"></div>
+                                        <div th:if="${entry.catalogMetadata.containsKey('docsCredentials')}"
+                                             class="tab-pane fade" th:id="'credentials-' + ${entry.offering.guid}"
+                                             th:utext="${entry.catalogMetadata.get('docsCredentials')}"></div>
+                                    </div>
+                                </div>
+                                <div class="modal-footer border-secondary">
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </div>
 
