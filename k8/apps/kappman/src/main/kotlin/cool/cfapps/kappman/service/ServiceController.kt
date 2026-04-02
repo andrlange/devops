@@ -1,5 +1,7 @@
 package cool.cfapps.kappman.service
 
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
 import cool.cfapps.kappman.audit.AuditService
 import cool.cfapps.kappman.cfapi.CfApiService
 import org.springframework.stereotype.Controller
@@ -11,7 +13,8 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes
 class ServiceController(
     private val cfApiService: CfApiService,
     private val auditService: AuditService,
-    private val userService: cool.cfapps.kappman.auth.UserService
+    private val userService: cool.cfapps.kappman.auth.UserService,
+    private val objectMapper: ObjectMapper
 ) {
 
     @GetMapping("/services")
@@ -107,8 +110,23 @@ class ServiceController(
     }
 
     @PostMapping("/services")
-    fun createService(@RequestParam name: String, @RequestParam spaceGuid: String, @RequestParam planGuid: String, redirectAttributes: RedirectAttributes): String {
-        val svc = cfApiService.createServiceInstance(name, spaceGuid, planGuid)
+    fun createService(
+        @RequestParam name: String,
+        @RequestParam spaceGuid: String,
+        @RequestParam planGuid: String,
+        @RequestParam(required = false) parameters: String?,
+        redirectAttributes: RedirectAttributes
+    ): String {
+        val params: Map<String, Any>? = if (!parameters.isNullOrBlank()) {
+            try {
+                objectMapper.readValue(parameters, object : TypeReference<Map<String, Any>>() {})
+            } catch (e: Exception) {
+                redirectAttributes.addFlashAttribute("error", "Invalid JSON parameters: ${e.message}")
+                return "redirect:/marketplace"
+            }
+        } else null
+
+        val svc = cfApiService.createServiceInstance(name, spaceGuid, planGuid, params)
         if (svc != null) {
             auditService.log("CREATE", "service_instance", svc.guid, "Created service: $name")
             redirectAttributes.addFlashAttribute("success", "Service '$name' created")

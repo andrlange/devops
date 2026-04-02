@@ -149,8 +149,8 @@ class CfApiService(
         return parsePaginatedResponse(json)
     }
 
-    fun createServiceInstance(name: String, spaceGuid: String, planGuid: String): CfServiceInstance? {
-        val body = mapOf(
+    fun createServiceInstance(name: String, spaceGuid: String, planGuid: String, parameters: Map<String, Any>? = null): CfServiceInstance? {
+        val body = mutableMapOf<String, Any>(
             "type" to "managed",
             "name" to name,
             "relationships" to mapOf(
@@ -158,6 +158,9 @@ class CfApiService(
                 "service_plan" to mapOf("data" to mapOf("guid" to planGuid))
             )
         )
+        if (parameters != null) {
+            body["parameters"] = parameters
+        }
         return cfApiClient.post("/v3/service_instances", body, CfServiceInstance::class.java)
     }
 
