@@ -13,9 +13,9 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes
 class ServiceController(
     private val cfApiService: CfApiService,
     private val auditService: AuditService,
-    private val userService: cool.cfapps.kappman.auth.UserService,
-    private val objectMapper: ObjectMapper
+    private val userService: cool.cfapps.kappman.auth.UserService
 ) {
+    private val objectMapper = ObjectMapper()
 
     @GetMapping("/services")
     fun listServices(model: Model): String {
