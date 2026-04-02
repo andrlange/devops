@@ -15,7 +15,7 @@ class GlobalModelAttributes(
     fun addGlobalAttributes(model: Model) {
         model.addAttribute("runtimeEnv", runtimeEnvironment)
         model.addAttribute("instanceId", kappmanProperties.instanceId)
-        model.addAttribute("appVersion", "V1.0.0")
+        model.addAttribute("appVersion", "V1.1.0")
         val auth = SecurityContextHolder.getContext().authentication
         if (auth != null && auth.isAuthenticated && auth.name != "anonymousUser") {
             model.addAttribute("currentUsername", auth.name)
