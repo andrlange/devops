@@ -104,7 +104,7 @@ Save the `AccessKeyId` and `SecretAccessKey` — you will need them when `instal
 
 ## 4. Installation Phases
 
-The wizard deploys the stack in 8 phases. All phases run automatically when using `./install.sh` without arguments.
+The wizard deploys the stack in 9 phases. All phases run automatically when using `./install.sh` without arguments.
 
 | Phase | Components | Description |
 |-------|-----------|-------------|
@@ -116,8 +116,37 @@ The wizard deploys the stack in 8 phases. All phases run automatically when usin
 | 6 | Cloud Foundry | Korifi (CF on K8s), kpack, Contour Gateway, Buildpacks |
 | 7 | Service Brokers | OSBAPI Broker: PostgreSQL, Valkey, RabbitMQ, S3 (requires Go) |
 | 8 | kappman | Korifi Apps Manager UI (Spring Boot, deployed via `cf push`) |
+| 9 | Marketplace Extension 1 | PostgreSQL AI Enabled, OpenBao Secrets, AI Connector [OPTIONAL] |
 
 Each phase tracks completion state and can be resumed individually with `./install.sh phase <N>`. A timing summary is displayed after each phase.
+
+---
+
+## 4a. Extending an Existing Installation
+
+If you already have a running stack (Phase 7+) and want to add AI/ML marketplace services without re-running the full installer:
+
+```bash
+cd ~/devops-stack/k8/distribution
+./extend-marketplace-1.sh
+```
+
+This adds three new services to the Cloud Foundry marketplace:
+
+| Service | Description |
+|---------|-------------|
+| **postgres-ai** | PostgreSQL 17 with pgvector, pgvectorscale, PostGIS, full-text search |
+| **openbao-secrets** | Application-managed secrets in OpenBao with AppRole access |
+| **ai-connector** | Connect to external Ollama / LM Studio instances |
+
+For new installations, these services are included automatically as Phase 9.
+
+**Usage examples:**
+```bash
+cf create-service postgres-ai small my-vector-db
+cf create-service openbao-secrets default my-secrets
+cf create-service ai-connector default my-ai -c '{"provider":"ollama","host":"192.168.64.1","port":11434}'
+```
 
 ---
 
@@ -271,6 +300,9 @@ cf marketplace
 | valkey | small | Valkey (Redis-compatible) key-value store |
 | rabbitmq | small | RabbitMQ message broker |
 | s3 | default | S3-compatible object storage (Garage) |
+| postgres-ai | small | PostgreSQL 17 with pgvector, pgvectorscale, PostGIS, full-text search |
+| openbao-secrets | default | Application-managed secrets in OpenBao with AppRole access |
+| ai-connector | default | Connect to external Ollama / LM Studio instances |
 
 ```bash
 # Create a service
