@@ -62,11 +62,15 @@ class MarketplaceController(
                 mapOf("plan" to plan, "instanceCount" to planInstances.size)
             }
 
+            val catalogMetadata = (offering.brokerCatalog?.get("metadata") as? Map<*, *>)
+                ?.mapKeys { it.key.toString() } ?: emptyMap()
+
             mapOf(
                 "offering" to offering,
                 "plans" to planDetails,
                 "instanceCount" to offeringInstances.size,
-                "bindingCount" to totalBindings
+                "bindingCount" to totalBindings,
+                "catalogMetadata" to catalogMetadata
             )
         }
 
@@ -79,9 +83,15 @@ class MarketplaceController(
         model.addAttribute("activePage", "marketplace")
         model.addAttribute("pageTitle", "Service Plans")
         val offerings = cfApiService.listOfferings()
-        model.addAttribute("offering", offerings.find { it.guid == offeringGuid })
+        val offering = offerings.find { it.guid == offeringGuid }
+        model.addAttribute("offering", offering)
         model.addAttribute("plans", cfApiService.listPlans(offeringGuid))
         model.addAttribute("spaces", cfApiService.listSpaces())
+
+        val catalogMetadata = (offering?.brokerCatalog?.get("metadata") as? Map<*, *>)
+            ?.mapKeys { it.key.toString() } ?: emptyMap<String, Any>()
+        model.addAttribute("catalogMetadata", catalogMetadata)
+
         return "marketplace/create-instance"
     }
 }
