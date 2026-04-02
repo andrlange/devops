@@ -71,6 +71,48 @@ run_phase_9() {
     mark_component_installed "phase9_broker_image" "$STATE_FILE"
   fi
 
+  # --- Step 2a: Update existing service broker with metadata ---
+  if ! component_is_installed "phase9_existing_broker_update" "$STATE_FILE"; then
+    log_step "Updating existing service broker to v1.4.0 (adding service documentation)"
+
+    local EXISTING_BROKER_SRC="${INSTALL_DIR}/../services/cf-service-broker/src"
+    local EXISTING_BROKER_IMAGE="artifactory.cfapps.cool/docker-local/cf-service-broker:1.4.0-arm64"
+    local BASE_IMAGE="gcr.io/distroless/static:nonroot"
+
+    if command -v go &>/dev/null && command -v crane &>/dev/null; then
+      local BUILD_DIR
+      BUILD_DIR=$(mktemp -d)
+
+      log_info "Cross-compiling existing broker for linux/arm64..."
+      (cd "${EXISTING_BROKER_SRC}" && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "${BUILD_DIR}/broker" .)
+
+      local TMPDIR_IMG
+      TMPDIR_IMG=$(mktemp -d)
+      mkdir -p "${TMPDIR_IMG}/app"
+      cp "${BUILD_DIR}/broker" "${TMPDIR_IMG}/app/broker"
+      chmod +x "${TMPDIR_IMG}/app/broker"
+
+      local LAYER
+      LAYER=$(mktemp)
+      (cd "${TMPDIR_IMG}" && tar cf "${LAYER}" app/)
+
+      crane append --base "${BASE_IMAGE}" --new_tag "${EXISTING_BROKER_IMAGE}" --new_layer "${LAYER}" --platform linux/arm64 --insecure 2>/dev/null
+      crane mutate "${EXISTING_BROKER_IMAGE}" --entrypoint "/app/broker" --tag "${EXISTING_BROKER_IMAGE}" --insecure 2>/dev/null
+
+      rm -rf "${BUILD_DIR}" "${TMPDIR_IMG}" "${LAYER}"
+      log_success "Existing broker image built and pushed: ${EXISTING_BROKER_IMAGE}"
+
+      kubectl set image deployment/cf-service-broker -n cf-services \
+        broker="${EXISTING_BROKER_IMAGE}"
+      kubectl rollout status deployment/cf-service-broker -n cf-services --timeout=60s
+      log_success "Existing broker updated to v1.4.0"
+    else
+      log_warn "go or crane not found — update broker manually"
+    fi
+
+    mark_component_installed "phase9_existing_broker_update" "$STATE_FILE"
+  fi
+
   # --- Step 3: Deploy ExternalSecret ---
   if ! component_is_installed "phase9_externalsecret" "$STATE_FILE"; then
     log_step "Deploying ExternalSecret for OpenBao token"
@@ -166,6 +208,20 @@ run_phase_9() {
 CREDS
 
     mark_component_installed "phase9_docs" "$STATE_FILE"
+  fi
+
+  # --- Step 8: Update kappman ---
+  if ! component_is_installed "phase9_kappman_update" "$STATE_FILE"; then
+    log_step "Updating kappman to V1.1.0 (parameters + service docs)"
+
+    local KAPPMAN_DIR="${INSTALL_DIR}/../apps/kappman"
+    (cd "$KAPPMAN_DIR" && cf push kappman) && {
+      log_success "kappman updated to V1.1.0"
+    } || {
+      log_warn "kappman update failed — update manually with: cd k8/apps/kappman && cf push kappman"
+    }
+
+    mark_component_installed "phase9_kappman_update" "$STATE_FILE"
   fi
 
   mark_phase_complete 9 "$STATE_FILE"
