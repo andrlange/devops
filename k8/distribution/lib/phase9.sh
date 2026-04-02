@@ -38,12 +38,35 @@ run_phase_9() {
   if ! component_is_installed "phase9_broker_image" "$STATE_FILE"; then
     log_step "Building marketplace broker image"
 
-    limactl shell "$LIMA_VM" bash -c "
-      cd /home/${USER}.linux/.devops-stack/services/cf-marketplace-broker
-      sudo nerdctl build -t artifactory.cfapps.cool/docker-local/cf-marketplace-broker:1.0.0-arm64 .
-      sudo nerdctl push artifactory.cfapps.cool/docker-local/cf-marketplace-broker:1.0.0-arm64
-    "
-    log_success "Broker image pushed to Artifactory"
+    local BROKER_SRC="${INSTALL_DIR}/../services/cf-marketplace-broker/src"
+    local BROKER_IMAGE="artifactory.cfapps.cool/docker-local/cf-marketplace-broker:1.0.0-arm64"
+    local BASE_IMAGE="gcr.io/distroless/static:nonroot"
+
+    if command -v go &>/dev/null && command -v crane &>/dev/null; then
+      local BUILD_DIR
+      BUILD_DIR=$(mktemp -d)
+
+      log_info "Cross-compiling broker for linux/arm64..."
+      (cd "${BROKER_SRC}" && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "${BUILD_DIR}/broker" .)
+
+      local TMPDIR_IMG
+      TMPDIR_IMG=$(mktemp -d)
+      mkdir -p "${TMPDIR_IMG}/app"
+      cp "${BUILD_DIR}/broker" "${TMPDIR_IMG}/app/broker"
+      chmod +x "${TMPDIR_IMG}/app/broker"
+
+      local LAYER
+      LAYER=$(mktemp)
+      (cd "${TMPDIR_IMG}" && tar cf "${LAYER}" app/)
+
+      crane append --base "${BASE_IMAGE}" --new_tag "${BROKER_IMAGE}" --new_layer "${LAYER}" --platform linux/arm64 --insecure 2>/dev/null
+      crane mutate "${BROKER_IMAGE}" --entrypoint "/app/broker" --tag "${BROKER_IMAGE}" --insecure 2>/dev/null
+
+      rm -rf "${BUILD_DIR}" "${TMPDIR_IMG}" "${LAYER}"
+      log_success "Broker image built and pushed: ${BROKER_IMAGE}"
+    else
+      log_warn "go or crane not found — build broker manually: k8/services/cf-marketplace-broker/src"
+    fi
 
     mark_component_installed "phase9_broker_image" "$STATE_FILE"
   fi
@@ -110,13 +133,14 @@ run_phase_9() {
     local BROKER_PASSWORD
     BROKER_PASSWORD=$(kubectl get secret marketplace-broker-openbao-token -n cf-services -o jsonpath='{.data.token}' | base64 -d)
 
-    limactl shell "$LIMA_VM" bash -c "
-      cd /home/${USER}.linux/.devops-stack/services/cf-marketplace-broker/test
+    local TEST_DIR="${INSTALL_DIR}/../services/cf-marketplace-broker/test"
+    (
+      cd "${TEST_DIR}"
       BROKER_URL=http://cf-marketplace-broker.cf-services.svc:80 \
       BROKER_USER=marketplace-broker \
-      BROKER_PASSWORD='${BROKER_PASSWORD}' \
+      BROKER_PASSWORD="${BROKER_PASSWORD}" \
       go test -v -timeout 300s ./...
-    " && {
+    ) && {
       log_success "Integration tests passed"
       mark_component_installed "phase9_test" "$STATE_FILE"
     } || {
