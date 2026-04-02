@@ -83,6 +83,10 @@
                                             <button class="nav-link" data-bs-toggle="tab"
                                                     th:attr="data-bs-target='#credentials-' + ${entry.offering.guid}" type="button">Credentials</button>
                                         </li>
+                                        <li class="nav-item" th:if="${entry.catalogMetadata.containsKey('docsCreateService')}">
+                                            <button class="nav-link" data-bs-toggle="tab"
+                                                    th:attr="data-bs-target='#createservice-' + ${entry.offering.guid}" type="button">Create Service</button>
+                                        </li>
                                     </ul>
                                     <div class="tab-content">
                                         <div class="tab-pane fade show active" th:id="'overview-' + ${entry.offering.guid}"
@@ -93,6 +97,9 @@
                                         <div th:if="${entry.catalogMetadata.containsKey('docsCredentials')}"
                                              class="tab-pane fade" th:id="'credentials-' + ${entry.offering.guid}"
                                              th:utext="${entry.catalogMetadata.get('docsCredentials')}"></div>
+                                        <div th:if="${entry.catalogMetadata.containsKey('docsCreateService')}"
+                                             class="tab-pane fade" th:id="'createservice-' + ${entry.offering.guid}"
+                                             th:utext="${entry.catalogMetadata.get('docsCreateService')}"></div>
                                     </div>
                                 </div>
                                 <div class="modal-footer border-secondary">

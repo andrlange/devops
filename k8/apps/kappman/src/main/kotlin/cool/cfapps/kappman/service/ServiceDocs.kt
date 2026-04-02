@@ -6,7 +6,8 @@ object ServiceDocs {
         val displayName: String,
         val docsOverview: String,
         val docsParameters: String? = null,
-        val docsCredentials: String? = null
+        val docsCredentials: String? = null,
+        val docsCreateService: String? = null
     )
 
     private val docs = mapOf(
@@ -28,7 +29,14 @@ object ServiceDocs {
   "password": "&lt;generated&gt;",
   "uri": "postgres://app:&lt;pw&gt;@&lt;host&gt;:5432/app",
   "jdbcUrl": "jdbc:postgresql://&lt;host&gt;:5432/app"
-}</code></pre>"""
+}</code></pre>""",
+            docsCreateService = """<h6>Create a PostgreSQL Instance</h6>
+<pre><code>cf create-service postgresql small my-db
+cf create-service postgresql medium my-large-db</code></pre>
+<h6>Bind to an Application</h6>
+<pre><code>cf bind-service my-app my-db
+cf restage my-app</code></pre>
+<p>The application receives connection details via <code>VCAP_SERVICES</code> environment variable or service bindings at <code>/bindings/my-db/</code>.</p>"""
         ),
 
         "valkey" to Docs(
@@ -46,7 +54,13 @@ object ServiceDocs {
   "port": "6379",
   "password": "&lt;generated&gt;",
   "uri": "redis://:&lt;pw&gt;@&lt;host&gt;:6379"
-}</code></pre>"""
+}</code></pre>""",
+            docsCreateService = """<h6>Create a Valkey Instance</h6>
+<pre><code>cf create-service valkey small my-cache</code></pre>
+<h6>Bind to an Application</h6>
+<pre><code>cf bind-service my-app my-cache
+cf restage my-app</code></pre>
+<p>Use the <code>uri</code> from the binding credentials to connect with any Redis-compatible client.</p>"""
         ),
 
         "rabbitmq" to Docs(
@@ -67,7 +81,13 @@ object ServiceDocs {
   "uri": "amqp://&lt;user&gt;:&lt;pw&gt;@&lt;host&gt;:5672/%2f",
   "http_api_uri": "http://&lt;user&gt;:&lt;pw&gt;@&lt;host&gt;:15672/api",
   "vhost": "/"
-}</code></pre>"""
+}</code></pre>""",
+            docsCreateService = """<h6>Create a RabbitMQ Instance</h6>
+<pre><code>cf create-service rabbitmq small my-mq</code></pre>
+<h6>Bind to an Application</h6>
+<pre><code>cf bind-service my-app my-mq
+cf restage my-app</code></pre>
+<p>Use the <code>uri</code> (AMQP) or <code>http_api_uri</code> (Management API) from the binding credentials.</p>"""
         ),
 
         "s3" to Docs(
@@ -88,7 +108,13 @@ object ServiceDocs {
   "region": "garage",
   "path_style": true,
   "uri": "s3://&lt;key&gt;:&lt;secret&gt;@&lt;endpoint&gt;/&lt;bucket&gt;"
-}</code></pre>"""
+}</code></pre>""",
+            docsCreateService = """<h6>Create an S3 Bucket</h6>
+<pre><code>cf create-service s3 default my-bucket</code></pre>
+<h6>Bind to an Application</h6>
+<pre><code>cf bind-service my-app my-bucket
+cf restage my-app</code></pre>
+<p>Use <code>access_key_id</code>, <code>secret_access_key</code>, <code>endpoint</code>, and <code>bucket</code> from the binding credentials with any S3-compatible client (AWS SDK, MinIO client, etc.). Set <code>path_style=true</code>.</p>"""
         ),
 
         "postgres-ai" to Docs(
@@ -118,7 +144,17 @@ object ServiceDocs {
   "uri": "postgresql://app:&lt;pw&gt;@&lt;host&gt;:5432/app",
   "jdbcUrl": "jdbc:postgresql://&lt;host&gt;:5432/app",
   "extensions": ["vector","vectorscale","pg_trgm",...]
-}</code></pre>"""
+}</code></pre>""",
+            docsCreateService = """<h6>Create a PostgreSQL AI Instance</h6>
+<pre><code>cf create-service postgres-ai small my-vector-db
+cf create-service postgres-ai medium my-large-ai-db</code></pre>
+<h6>Bind to an Application</h6>
+<pre><code>cf bind-service my-app my-vector-db
+cf restage my-app</code></pre>
+<p>All AI/ML extensions are pre-activated. Use <code>pgvector</code> for vector similarity search:</p>
+<pre><code>CREATE TABLE items (id serial, embedding vector(1536));
+INSERT INTO items (embedding) VALUES ('[0.1, 0.2, ...]');
+SELECT * FROM items ORDER BY embedding &lt;-&gt; '[0.3, 0.4, ...]' LIMIT 5;</code></pre>"""
         ),
 
         "openbao-secrets" to Docs(
@@ -154,7 +190,13 @@ PUT /v1/cf-secrets/data/instance-&lt;id&gt;/my-key
 {"data":{"username":"admin","password":"s3cret"}}
 
 # 3. Read a secret
-GET /v1/cf-secrets/data/instance-&lt;id&gt;/my-key</code></pre>"""
+GET /v1/cf-secrets/data/instance-&lt;id&gt;/my-key</code></pre>""",
+            docsCreateService = """<h6>Create a Secret Container</h6>
+<pre><code>cf create-service openbao-secrets default my-secrets</code></pre>
+<h6>Bind to an Application</h6>
+<pre><code>cf bind-service my-app my-secrets
+cf restage my-app</code></pre>
+<p>The application receives <code>role_id</code> and <code>secret_id</code> for AppRole authentication. Use these to login to OpenBao and manage secrets under the dedicated path.</p>"""
         ),
 
         "ai-connector" to Docs(
@@ -209,7 +251,26 @@ GET /v1/cf-secrets/data/instance-&lt;id&gt;/my-key</code></pre>"""
 <ol>
 <li>Call <code>models_url</code> to list available models</li>
 <li>Call <code>base_url + "/chat/completions"</code> with model name and prompt</li>
-</ol>"""
+</ol>""",
+            docsCreateService = """<h6>Create with Single Endpoint (Ollama)</h6>
+<pre><code>cf create-service ai-connector default my-ollama \
+  -c '{"provider":"ollama","host":"192.168.64.1","port":11434}'</code></pre>
+<h6>Create with Single Endpoint (LM Studio)</h6>
+<pre><code>cf create-service ai-connector default my-lmstudio \
+  -c '{"provider":"lmstudio","host":"192.168.64.1","port":1234}'</code></pre>
+<h6>Create with Multiple Endpoints</h6>
+<pre><code>cf create-service ai-connector default my-ai \
+  -c '{"endpoints":[
+    {"name":"ollama","provider":"ollama","host":"192.168.64.1","port":11434},
+    {"name":"lmstudio","provider":"lmstudio","host":"192.168.64.1","port":1234}
+  ]}'</code></pre>
+<h6>With API Key (if required)</h6>
+<pre><code>cf create-service ai-connector default my-ai \
+  -c '{"provider":"ollama","host":"10.0.1.50","port":11434,"api_key":"sk-xxx"}'</code></pre>
+<h6>Bind to an Application</h6>
+<pre><code>cf bind-service my-app my-ollama
+cf restage my-app</code></pre>
+<p>The application receives <code>base_url</code> and <code>models_url</code> for the OpenAI-compatible API. Use any OpenAI SDK client to interact with the models.</p>"""
         )
     )
 
@@ -223,6 +284,7 @@ GET /v1/cf-secrets/data/instance-&lt;id&gt;/my-key</code></pre>"""
         )
         d.docsParameters?.let { map["docsParameters"] = it }
         d.docsCredentials?.let { map["docsCredentials"] = it }
+        d.docsCreateService?.let { map["docsCreateService"] = it }
         return map
     }
 }
