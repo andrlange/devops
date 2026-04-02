@@ -190,7 +190,7 @@ print_phase_timing() {
   log_info "────────────────────────────────────"
   log_info "  Phase Timing"
   log_info "────────────────────────────────────"
-  for phase in 1 2 3 4 5 6 7; do
+  for phase in 1 2 3 4 5 6 7 8 9; do
     local dur_var="PHASE_DUR_${phase}"
     local dur="${!dur_var:-}"
     if [[ -n "$dur" ]]; then
@@ -2971,6 +2971,14 @@ for ns in sorted(namespaces):
 }
 
 # =============================================================================
+# Phase 9 — Marketplace Extension 1: AI/ML Services
+# =============================================================================
+install_phase_9() {
+  source "$SCRIPT_DIR/lib/phase9.sh"
+  run_phase_9
+}
+
+# =============================================================================
 # Status — Show installation status
 # =============================================================================
 cmd_status() {
@@ -2987,8 +2995,9 @@ cmd_status() {
     "Cloud Foundry / Korifi [OPTIONAL]"
     "CF Service Brokers [OPTIONAL]"
     "kappman — Korifi App Manager [OPTIONAL]"
+    "Marketplace Extension 1: AI/ML Services [OPTIONAL]"
   )
-  for i in 1 2 3 4 5 6 7 8; do
+  for i in 1 2 3 4 5 6 7 8 9; do
     local status_color="$RED"
     local status_text="Not installed"
     if phase_is_complete "$i" "$STATE_FILE"; then
@@ -3174,6 +3183,14 @@ continue_from_phase() {
     fi
   fi
 
+  if [[ "$completed_phase" -lt 9 ]] && phase_is_complete 8 "$STATE_FILE"; then
+    echo ""
+    log_info "Phase 9 deploys: Marketplace Extension 1 (PostgreSQL AI, OpenBao Secrets, AI Connector)"
+    if ask_yes_no "Continue with Phase 9 (Marketplace Extension 1)?" "y"; then
+      install_phase_9
+    fi
+  fi
+
   echo ""
   log_success "Installation complete!"
   print_phase_timing
@@ -3195,7 +3212,7 @@ cmd_full_setup() {
   fi
 
   echo ""
-  log_info "Starting full installation (Phase 1-8)..."
+  log_info "Starting full installation (Phase 1-9)..."
   echo ""
 
   install_phase_1
@@ -3206,6 +3223,7 @@ cmd_full_setup() {
   install_phase_6
   install_phase_7
   install_phase_8
+  install_phase_9
 
   echo ""
   log_success "Installation complete!"
@@ -3226,7 +3244,7 @@ Usage: $(basename "$0") <command> [args]
 ${BOLD}Commands:${NC}
   ${CYAN}(none)${NC}          Interactive full setup (zero + all phases)
   ${CYAN}zero${NC}            Iteration Zero — gather all configuration interactively
-  ${CYAN}phase <N>${NC}       Install a specific phase (1-8):
+  ${CYAN}phase <N>${NC}       Install a specific phase (1-9):
                     1: Foundation (Lima, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager)
                     2: Platform (ArgoCD, Portainer, Garage, Technitium, Velero)
                     3: Monitoring (Loki, Mimir, Tempo, Alloy, KSM, node-exporter, Grafana)
@@ -3235,6 +3253,7 @@ ${BOLD}Commands:${NC}
                     6: Cloud Foundry / Korifi [OPTIONAL] (requires phases 1-3)
                     7: CF Service Brokers [OPTIONAL] (requires phase 6)
                     8: kappman — Korifi App Manager [OPTIONAL] (requires phases 6+7)
+                    9: Marketplace Extension 1 [OPTIONAL] (requires phases 6+7)
   ${CYAN}status${NC}          Show installation status and service health
   ${CYAN}validate${NC}        Validate all prerequisites
 
@@ -3269,7 +3288,7 @@ main() {
     phase)
       local phase_num="${1:-}"
       if [[ -z "$phase_num" ]]; then
-        log_error "Usage: ./install.sh phase <1-7>"
+        log_error "Usage: ./install.sh phase <1-9>"
         exit 1
       fi
       case "$phase_num" in
@@ -3281,8 +3300,9 @@ main() {
         6) install_phase_6 ;;
         7) install_phase_7 ;;
         8) install_phase_8 ;;
+        9) install_phase_9 ;;
         *)
-          log_error "Unknown phase: $phase_num (valid: 1-8)"
+          log_error "Unknown phase: $phase_num (valid: 1-9)"
           exit 1
           ;;
       esac
