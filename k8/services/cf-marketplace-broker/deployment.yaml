@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cf-marketplace-broker
+  namespace: cf-services
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cf-marketplace-broker
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "create", "delete", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps"]
+    verbs: ["get", "list", "create", "update", "delete", "watch", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cf-marketplace-broker
+subjects:
+  - kind: ServiceAccount
+    name: cf-marketplace-broker
+    namespace: cf-services
+roleRef:
+  kind: ClusterRole
+  name: cf-marketplace-broker
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cf-marketplace-broker
+  namespace: cf-services
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cf-marketplace-broker
+  template:
+    metadata:
+      labels:
+        app: cf-marketplace-broker
+    spec:
+      serviceAccountName: cf-marketplace-broker
+      imagePullSecrets:
+        - name: artifact-keeper-pull
+      containers:
+        - name: broker
+          image: artifactory.cfapps.cool/docker-local/cf-marketplace-broker:1.0.0-arm64
+          ports:
+            - containerPort: 8081
+          env:
+            - name: BROKER_USERNAME
+              value: "marketplace-broker"
+            - name: BROKER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: marketplace-broker-openbao-token
+                  key: token
+            - name: NAMESPACE
+              value: "cf-services"
+            - name: OPENBAO_ADDR
+              value: "http://openbao.openbao.svc.cluster.local:8200"
+            - name: OPENBAO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: marketplace-broker-openbao-token
+                  key: token
+            - name: PORT
+              value: "8081"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cf-marketplace-broker
+  namespace: cf-services
+spec:
+  selector:
+    app: cf-marketplace-broker
+  ports:
+    - port: 80
+      targetPort: 8081
