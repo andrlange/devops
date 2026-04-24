@@ -2974,7 +2974,8 @@ for ns in sorted(namespaces):
 # Phase 9 — Marketplace Extension 1: AI/ML Services
 # =============================================================================
 install_phase_9() {
-  source "$SCRIPT_DIR/lib/phase9.sh"
+  INSTALL_DIR="$DIST_DIR"
+  source "$DIST_DIR/lib/phase9.sh"
   run_phase_9
 }
 

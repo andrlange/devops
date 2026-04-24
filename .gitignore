@@ -9,3 +9,10 @@ k8/distribution/.install-state
 credentials.md
 openbao_credentials.md
 dist/
+
+# macOS
+.DS_Store
+
+# Compiled Go broker binaries (build artifacts)
+k8/services/cf-service-broker/src/cf-service-broker
+k8/services/cf-marketplace-broker/src/cf-marketplace-broker
