@@ -520,5 +520,284 @@ artifact-keeper), upload `installer-v1.2.0.sh` + `stack-v1.2.0.tgz` to the remot
 
 ---
 
-*Next: Chapter 3 — per-wave upgrade procedures (commands, verification, rollback) following the wave
-map, starting with the pin-to-current commit and the ESO v1beta1→v1 migration as the first risky gate.*
+## Chapter 3 — Upgrade Waves: Execution Plan
+
+> This chapter is the **authoritative sequence** and supersedes the rough "Dependency & ordering map"
+> earlier in the doc. Commands use the repo's real paths and the `development.cfapps.cool` platform
+> domain; replace placeholders in `<…>`. Where a config key depends on artifact-keeper 1.2.0 or a new
+> chart's `values.yaml`, the step says so — **diff against the real file before applying**, don't trust
+> a key from memory.
+
+### 3.0 Conventions & standing gates
+
+**What a wave is:** one atomic, independently verifiable, independently revertable change set. Never
+two risky changes in flight. Five rules: *(1)* atomic+reversible, *(2)* backup gate before any stateful
+wave, *(3)* mirror images ahead, *(4)* GitOps = bump-in-git → manual sync one app, *(5)* low-blast-radius
+first within a wave.
+
+**Standard backup gate** (run the relevant lines before every stateful wave; tag with the wave #):
+```bash
+# Plane A — cluster + PVs
+velero backup create wave<N>-pre --wait
+kubectl get pvc -A                                   # record bound PVCs
+# Host — Lima VM snapshot (newer Lima) or cold copy
+limactl snapshot create k3s-server --tag wave<N> 2>/dev/null \
+  || { limactl stop k3s-server && cp -a ~/.lima/k3s-server ~/.lima/k3s-server.wave<N> && limactl start k3s-server; }
+# Plane B — per stack (run in the stack dir)
+cd artifactory && ./scripts/backup.sh && cd -        # + otel/ vault/ as touched
+```
+
+**GitOps sync flow** (turn auto-sync off for the campaign so each change is deliberate):
+```bash
+argocd app set <app> --sync-policy none              # once, per app (or the root app-of-apps)
+# per change:
+git commit -am "wave<N>: <component> <old> -> <new>" && git push
+argocd app sync <app> && argocd app wait <app> --health --operation --timeout 600
+```
+
+**Health baseline / verification probe** (green = safe to proceed):
+```bash
+argocd app list -o wide | grep -vE 'Synced.*Healthy' || echo "all Synced+Healthy"
+kubectl get pods -A | grep -vE 'Running|Completed' || echo "no bad pods"
+./k8/stack.sh status
+for h in argocd portainer grafana artifacts vault s3 dns backup gitlab; do
+  curl -sk -o /dev/null -w "%{http_code}  $h\n" "https://$h.development.cfapps.cool"; done
+```
+
+### 3.1 Wave map
+
+| # | Wave | 🔴? | Gate | One-line exit criteria |
+|---|---|---|---|---|
+| 0 | Stabilize & checkpoint (pin the 4 floats to *current*) | | full backup | baseline green, rollback artifacts exist |
+| 1 | Image supply chain (mirror targets; fix ghcr.io/quay.io sources) | | — | every target image pullable from remote registry |
+| 2 | Host foundation (Lima 2.x, K3s→1.36.x pinned) | 🔴 | VM snapshot | pods reschedule, PVs intact, kpack builds |
+| 3 | Networking & TLS edge (cert-manager→MetalLB→Traefik 40) | | — | all IngressRoutes serve, certs valid |
+| 4 | **Secrets backbone (OpenBao → ESO v2)** | 🔴 | Runbook A | all ExternalSecrets Ready |
+| 5 | Storage & platform (Garage→ArgoCD→Portainer→Technitium 15→Velero) | | backup | S3 R/W ok, ArgoCD healthy, backups run |
+| 6 | Observability (KSM/NE/Alloy→Tempo→Loki/Grafana repo move→Mimir 3.1) | | bucket note | telemetry flowing, blocks migrated |
+| 7 | **artifact-keeper in-cluster → 1.2.0 (OpenSearch)** | 🔴 | Runbook B | search ok, docker-login ok |
+| 8 | GitLab CE 18.10→18.11.4→19.0.1 + Runner | | backup each hop | repos/CI green at each stop |
+| 9 | CF/Korifi (kpack 0.17.1, Contour/Envoy; Korifi unchanged) | | — | `cf push` builds+routes+TLS |
+| 10 | Brokers & operators (CNPG, RabbitMQ quay.io, Valkey, Go rebuild) | | — | `cf marketplace` full, bind works |
+| 11 | **Plane B alignment (otel/router/vault)** | 🔴(Mimir) | Runbook C | each remote stack healthy |
+| 12 | **Remote artifact-keeper → 1.2.0 (LAST)** | 🔴 | Runbook C | pulls/pushes + generic repo work |
+| 13 | Re-cut distribution (v1.1.2→v1.2.0) | | — | fresh install from new artifacts works |
+| 14 | ⏸ Spring apps (DEFERRED, after Spring release) | | — | apps build+run on new triple |
+
+### 3.2 Routine waves — checklists
+
+Each routine wave = bump `Chart.yaml`+`values.yaml` (or raw manifest tag) → `argocd app sync` → probe →
+next. Rollback for all routine waves = `git revert` the wave commit + `argocd app sync`.
+
+- **Wave 0:** capture live versions of the 4 floats and pin them *as-is* first —
+  `kubectl get nodes -o wide` (K3s), `helm ls -A` (Reflector/CNPG charts), `kubectl -n rabbitmq-system get deploy -o jsonpath` (op image). Commit those exact versions, *then* later waves bump them.
+- **Wave 1:** mirror loop — for each target image: `crane copy --platform linux/arm64 <src> artifactory.cfapps.cool/docker-local/<repo>:<tag>-arm64`. Update mirror scripts for **kpack→ghcr.io** and **RabbitMQ op→quay.io**.
+- **Wave 2:** pre-check removed APIs (`kubectl api-resources` deltas; scan manifests for any removed beta). In-place K3s upgrade or VM-rebuild+restore. Verify a `cf push` still builds (kpack skew check).
+- **Wave 3:** order cert-manager (patch) → MetalLB (re-apply CRDs: `kubectl apply --server-side -f` the new CRDs) → Traefik (chart 39→40: `helm show values` diff first, watch every IngressRoute).
+- **Wave 5:** Garage first, verify `aws --endpoint s3 ls` against Garage before touching dependents; Technitium 15 → snapshot PV first.
+- **Wave 6:** Loki/Grafana → add `grafana-community` repo, switch chart source; Mimir → ensure TSDB blocks are index-v2 before the image bump.
+- **Wave 8:** strictly `18.10.7 → 18.11.4 → 19.0.1`; after each hop `gitlab-rake db:background_migrations:status` must be clean before the next; runner chart steps 0.87→0.88.3→0.89.1.
+- **Wave 9:** kpack 0.17.1 from ghcr.io mirror; Contour v1.33.5 + Envoy distroless-v1.35.10 (paired — don't bump Envoy alone); Korifi/Service-Binding unchanged; keep Paketo Java 21.4.0.
+- **Wave 10:** pin CNPG 1.29.1/chart 0.28.2 and RabbitMQ op 2.21.0 (quay.io); rebuild Go brokers — `go.mod`: `go 1.26.4`, `k8s.io/* v0.36.1`; rebuild `-arm64`, mirror, bump deployment tags. Operator upgrades roll managed instances — verify each existing service instance survives.
+- **Wave 13:** `./build-distribution.sh`; rename to `installer-v1.2.0.sh`/`stack-v1.2.0.tgz`; upload to remote generic repo (see root CLAUDE.md commands); bump installer pre-flight Go check to 1.26.4; write `UPGRADE-v1.2.0.md`.
+
+---
+
+### 3.3 Runbook A — Wave 4: Secrets backbone (OpenBao → ESO) 🔴
+
+> ESO feeds every secret (registry pull, DNS creds, service creds). Order: **store first (OpenBao),
+> then sync (ESO)**. ESO 0.16→v2 is a major re-version with a CRD `v1beta1→v1` migration.
+
+**Backup gate**
+```bash
+velero backup create wave4-secrets --include-namespaces openbao,external-secrets --wait
+kubectl get externalsecrets,clustersecretstores,secretstores,pushsecrets -A -o yaml > /tmp/eso-crs.bak.yaml
+kubectl get secrets -A -o yaml > /tmp/all-secrets.bak.yaml     # the synced targets
+# CONFIRM OpenBao unseal keys are in the password manager before proceeding
+```
+
+**Part 1 — OpenBao → v2.5.4 / chart 0.28.3**
+```bash
+helm repo add openbao https://openbao.github.io/openbao-helm && helm repo update
+helm show values openbao/openbao --version 0.28.3 > /tmp/openbao-0.28.3.defaults.yaml
+diff <(grep -v '^\s*#' k8/services/openbao/values.yaml) /tmp/openbao-0.28.3.defaults.yaml | less  # reconcile renamed keys
+crane manifest artifactory.cfapps.cool/docker-local/openbao/openbao:2.5.4-arm64 >/dev/null && echo IMG_OK
+# edit k8/services/openbao/Chart.yaml (version 0.28.3, appVersion 2.5.4) + values.yaml (image tag 2.5.4-arm64)
+git commit -am "wave4: OpenBao 2.5.1->2.5.4, chart 0.8.0->0.28.3" && git push
+argocd app sync openbao && argocd app wait openbao --health --timeout 600
+# pod restarts SEALED — unseal (standalone file backend):
+for k in <unseal-key-1> <unseal-key-2> <unseal-key-3>; do kubectl exec -n openbao openbao-0 -- bao operator unseal "$k"; done
+kubectl exec -n openbao openbao-0 -- bao status        # Sealed: false
+```
+
+**Part 2 — ESO → v2.5.0 (CRD v1beta1 → v1)** 🔴
+```bash
+helm repo add external-secrets https://charts.external-secrets.io && helm repo update
+kubectl get crd externalsecrets.external-secrets.io -o jsonpath='{.spec.versions[*].name}'; echo  # served versions now
+grep -rn "external-secrets.io/v1beta1" k8/            # every hit must move to .../v1
+# 1) migrate manifests: bump apiVersion v1beta1 -> v1 on ExternalSecret/ClusterSecretStore/SecretStore/PushSecret
+#    (read the ESO v1.0 + v2.0 release notes for any field renames before editing)
+# 2) install the new CRDs (major jump — do CRDs before the controller):
+helm show crds external-secrets/external-secrets --version 2.5.0 | kubectl apply --server-side -f -
+# 3) bump k8/platform/external-secrets/Chart.yaml (2.5.0) + values.yaml (image v2.5.0-arm64); diff vs new defaults
+git commit -am "wave4: ESO 0.16.1->2.5.0, CRDs v1beta1->v1" && git push
+argocd app sync external-secrets && argocd app wait external-secrets --health --timeout 600
+```
+
+**Verification**
+```bash
+kubectl get clustersecretstore -A                     # CONDITION Valid=True
+kubectl get externalsecrets -A                         # STATUS SecretSynced, Ready=True (all)
+kubectl -n <ns> get secret artifact-keeper-pull -o jsonpath='{.metadata.creationTimestamp}'; echo  # refreshed
+# force a resync and confirm cert-manager DNS creds + registry pull still resolve
+kubectl annotate externalsecret -A --all force-sync="$(date +%s)" --overwrite
+```
+
+**Rollback**
+```bash
+# ESO (do this first): revert the commit, restore old CRDs + CRs
+git revert --no-edit <wave4-eso-commit> && git push && argocd app sync external-secrets
+kubectl apply -f /tmp/eso-crs.bak.yaml     # NOTE: v1->v1beta1 is lossy; backup is the source of truth
+# OpenBao: restore PVC then redeploy old chart, then unseal
+velero restore create --from-backup wave4-secrets --include-namespaces openbao
+# re-unseal as in Part 1
+```
+
+---
+
+### 3.4 Runbook B — Wave 7: artifact-keeper (in-cluster) → 1.2.0 + OpenSearch 🔴
+
+> The in-cluster artifact-keeper (Phase 4 service at `artifacts.development.cfapps.cool`) is
+> self-contained — its own PostgreSQL, search, and Garage S3 bucket. v1.2.0 swaps **Meilisearch →
+> OpenSearch 2.x** and needs our 5 patches rebased. Images are built by the `artifactory/` pipeline and
+> pushed to the **remote** registry, then the in-cluster deployment pulls them.
+
+**Backup gate**
+```bash
+velero backup create wave7-ak --include-namespaces <ak-namespace> --wait
+kubectl exec -n <ns> <postgres-pod> -- pg_dump -U <user> <db> | gzip > /tmp/ak-pg.$(date +%F).sql.gz
+# artifact blobs live in Garage S3 (already covered by the Garage bucket); note the bucket name
+```
+
+**Part 1 — build `1.2.0-patched` images (in `artifactory/`)**
+```bash
+cd artifactory
+# drop any patch that is now upstream BEFORE cloning (see Ch.2 table: be/001, be/002 likely upstream)
+#   rm source/patches/backend/001-*.patch source/patches/backend/002-*.patch   # only if confirmed upstream
+BACKEND_REF=v1.2.0 WEB_REF=v1.2.0 ./scripts/build-containers.sh clone   # clones tag, git-applies remaining patches
+# fix any rejected patch by hand, per-patch:
+#   git -C source/backend apply --3way patches/backend/003-*.patch
+#   git -C source/web     apply --3way patches/web/*.patch
+( cd source/backend && cargo sqlx prepare --workspace )                  # regen sqlx cache for the 1.2.0 schema
+./scripts/build-containers.sh push                                       # -> andrlange/artifact-keeper-{backend,web}:1.2.0-patched-arm64 in remote registry
+cd -
+```
+
+**Part 2 — stand up OpenSearch 2.x**
+```bash
+crane manifest artifactory.cfapps.cool/docker-local/opensearchproject/opensearch:2.19.5-arm64 >/dev/null && echo IMG_OK
+# create k8/services/artifact-keeper/opensearch/ : StatefulSet + PVC + Service
+#   image: .../opensearchproject/opensearch:2.19.5-arm64
+#   env:   discovery.type=single-node ; OPENSEARCH_JAVA_OPTS=-Xms2g -Xmx2g ; security per your setup
+#   resources: request ~3Gi (heap*~1.5) — CHECK Lima 48Gi headroom
+# add it to the artifact-keeper kustomization/ArgoCD app
+git add k8/services/artifact-keeper/opensearch && git commit -m "wave7: add OpenSearch 2.19.5" && git push
+argocd app sync artifact-keeper && kubectl -n <ns> rollout status statefulset/opensearch
+kubectl -n <ns> exec <opensearch-pod> -- curl -s localhost:9200/_cluster/health | grep -o '"status":"[a-z]*"'  # green/yellow
+```
+
+**Part 3 — cut backend + web over to 1.2.0**
+```bash
+# k8/services/artifact-keeper/artifact-keeper/deployment.yaml:
+#   image -> .../artifact-keeper-backend:1.2.0-patched-arm64
+#   replace MEILI_* env with the OpenSearch endpoint/creds env  (use the EXACT keys from the 1.2.0 config docs)
+#   remove the Meilisearch init container + probe
+# deployment-web.yaml: image -> .../artifact-keeper-web:1.2.0-patched-arm64
+git commit -am "wave7: artifact-keeper rc.8-patched -> 1.2.0-patched (OpenSearch)" && git push
+argocd app sync artifact-keeper && argocd app wait artifact-keeper --health --timeout 600
+# reindex into OpenSearch per the 1.2.0 admin API / job
+```
+
+**Part 4 — decommission Meilisearch**
+```bash
+git rm -r k8/services/artifact-keeper/meilisearch && git commit -m "wave7: drop Meilisearch" && git push
+argocd app sync artifact-keeper
+kubectl -n <ns> delete pvc <meilisearch-pvc>          # only AFTER search is verified
+```
+
+**Verification**
+```bash
+curl -sk https://artifacts.development.cfapps.cool/healthz
+# search returns hits; service-account docker login (patch be/003) works:
+docker login artifacts.development.cfapps.cool -u <svc-account> -p <api-token>
+# permissions page (patch web/001) shows the repo dropdown in the browser
+```
+
+**Rollback**
+```bash
+git revert --no-edit <wave7-cutover-commit> <wave7-drop-meili-commit> && git push   # restores rc.8-patched + Meilisearch manifests
+argocd app sync artifact-keeper
+velero restore create --from-backup wave7-ak --include-namespaces <ak-namespace>     # if PVC/DB damaged
+# or DB-only: gunzip -c /tmp/ak-pg.*.sql.gz | kubectl exec -i -n <ns> <pg-pod> -- psql -U <user> <db>
+```
+
+---
+
+### 3.5 Runbook C — Waves 11–12: Plane B remote server (registry LAST) 🔴
+
+> Independent Docker-Compose stacks on the remote server. Wave 11 can run **in parallel** with Plane A.
+> Wave 12 (the registry) is strictly **last** — while it's down nothing can pull.
+
+**Wave 11 — align `otel/`, `router/`, `vault/`** (per stack)
+```bash
+cd <stack>            # otel | router | vault
+./scripts/backup.sh   # or ./stop.sh after a manual snapshot
+# edit docker-compose.yml image tags to the Ch.2 §2.10 targets
+./stop.sh && ./start.sh
+docker compose ps     # all healthy
+```
+- **router/**: HAProxy `3.2.19-alpine` (LTS), otel-collector `0.153.0` — **audit the collector pipeline config** (33 minors of breaks) before restart.
+- **vault/**: OpenBao `2.5.4`, postgres `18.4`, certbot `5.6.0`, nginx `1.30.2-alpine`; keep it aligned with the in-cluster OpenBao.
+- **otel/ Mimir 2.15 → 3.0 is MAJOR** — config moves to a ConfigMap (set `configStorageType: Secret` if you externalize), MQE becomes default. **Do blue/green** (stand up new Mimir, dual-write, cut reads over) per the Grafana migration guide rather than in-place. Grafana 11→12 removes AngularJS — audit dashboards first.
+
+**Wave 12 — remote artifact-keeper → 1.2.0 (the pull source)**
+```bash
+cd artifactory
+./scripts/backup.sh                       # full DB + artifacts (the 663MB-class zip). MANDATORY.
+# announce a short maintenance window — pulls will be briefly unavailable
+```
+1. Reuse the `1.2.0-patched` images built in Wave 7 (already in the registry), or rebuild here if the remote tree differs.
+2. Edit `artifactory/docker-compose.yml`:
+   - `artifact-keeper-backend` / `-web` → `1.2.0-patched`
+   - **replace the `meilisearch` service with `opensearchproject/opensearch:2.19.5`** (env `discovery.type=single-node`, `OPENSEARCH_JAVA_OPTS`, a data volume)
+   - rewire backend `MEILI_*` → OpenSearch (exact keys from 1.2.0 docs)
+   - `postgres:18.4`, `nginx:1.30.2-alpine`, `certbot/certbot:5.6.0`, otel `0.153.0`
+3. Apply + reindex:
+```bash
+./stop.sh && ./start.sh
+# trigger the 1.2.0 reindex; wait for OpenSearch green
+```
+
+**Verification (from a Plane A host — proves the supply chain is intact)**
+```bash
+crane manifest artifactory.cfapps.cool/docker-local/openbao/openbao:2.5.4-arm64 >/dev/null && echo PULL_OK
+curl -sk https://artifactory.cfapps.cool/healthz
+BASE=https://artifactory.cfapps.cool/api/v1/repositories/generic/download
+curl -sfL "$BASE/installer-v1.2.0.sh" -o /tmp/i.sh && echo GENERIC_REPO_OK
+```
+
+**Rollback (must be fast — this is the pull source)**
+```bash
+cd artifactory
+./stop.sh
+git checkout docker-compose.yml          # restore previous compose (previous image tags pinned)
+./scripts/restore.sh <latest-backup>     # DB + artifacts
+./start.sh
+# keep the previous-version images retained in the registry until Wave 12 is signed off
+```
+
+---
+
+*The plan is complete through Chapter 3. Execution starts at Wave 0 (pin-to-current + baseline). Each
+🔴 wave has its runbook above; routine waves follow the §3.2 checklist. Spring (Wave 14) is scheduled
+after next week's Spring release.*
