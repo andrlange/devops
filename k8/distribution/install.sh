@@ -1160,7 +1160,7 @@ POLICY' >/dev/null 2>&1 || true
   if ! component_is_installed "REFLECTOR" "$STATE_FILE"; then
     log_step "1.8 — Kubernetes Reflector"
     helm repo add emberstack https://emberstack.github.io/helm-charts 2>/dev/null || true
-    helm install reflector emberstack/reflector -n kube-system 2>&1 | tail -1
+    helm install reflector emberstack/reflector --version 10.0.24 -n kube-system 2>&1 | tail -1   # pinned Wave 0 (was unpinned); target 10.0.47
     wait_for_pods "kube-system" 60
 
     # Annotate wildcard-apps cert for reflection to korifi namespace
@@ -2545,7 +2545,7 @@ install_phase_7() {
   if ! component_is_installed "phase7_cnpg" "$STATE_FILE"; then
     log_step "Installing CloudNativePG operator..."
     helm repo add cnpg https://cloudnative-pg.github.io/charts 2>/dev/null || true
-    helm install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace 2>&1 | tail -1
+    helm install cnpg cnpg/cloudnative-pg --version 0.27.1 -n cnpg-system --create-namespace 2>&1 | tail -1   # pinned Wave 0 (was unpinned); target chart 0.28.2 / app 1.29.1
     wait_for_pods "cnpg-system" 120
     log_success "CloudNativePG operator installed"
     mark_component_installed "phase7_cnpg" "$STATE_FILE"
@@ -2554,7 +2554,8 @@ install_phase_7() {
   # --- Install RabbitMQ Cluster Operator ---
   if ! component_is_installed "phase7_rabbitmq_operator" "$STATE_FILE"; then
     log_step "Installing RabbitMQ Cluster Operator..."
-    kubectl apply -f https://github.com/rabbitmq/cluster-operator/releases/latest/download/cluster-operator.yml 2>&1 | tail -3
+    # pinned Wave 0 (was 'latest'); currently 2.20.0. Target 2.21.0 — note registry moves to quay.io.
+    kubectl apply -f https://github.com/rabbitmq/cluster-operator/releases/download/v2.20.0/cluster-operator.yml 2>&1 | tail -3
     wait_for_pods "rabbitmq-system" 120
     log_success "RabbitMQ Cluster Operator installed"
     mark_component_installed "phase7_rabbitmq_operator" "$STATE_FILE"

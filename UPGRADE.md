@@ -801,3 +801,80 @@ git checkout docker-compose.yml          # restore previous compose (previous im
 *The plan is complete through Chapter 3. Execution starts at Wave 0 (pin-to-current + baseline). Each
 🔴 wave has its runbook above; routine waves follow the §3.2 checklist. Spring (Wave 14) is scheduled
 after next week's Spring release.*
+
+---
+
+## Chapter 4 — Execution Log
+
+> Live record of the campaign. One entry per wave: status, what was done, evidence, and the commit.
+> Updated and pushed after each wave (per standing instruction).
+
+| Wave | Status | Date | Commit |
+|---|---|---|---|
+| 0 — Stabilize & checkpoint | ✅ complete (incl. OpenBao key-loss recovery) | 2026-06-05 | _this commit_ |
+
+### Wave 0 — Stabilize & checkpoint
+
+**Goal:** deterministic starting point — pin the 4 floating components to their *current running*
+versions, take full backups, and record a green health baseline before any version changes.
+
+**Live versions captured (the "current" to pin):**
+
+| Component | Running version | Note |
+|---|---|---|
+| K3s | **v1.34.5+k3s1** | was "unpinned" — actually 1.34, not 1.36. Wave 2 hop = 1.34→1.35→1.36. |
+| Kubernetes Reflector | chart/app **10.0.24** | (latest 10.0.47) |
+| CloudNativePG | chart **0.27.1** / app **1.28.1** | (latest 0.28.2 / 1.29.1) |
+| RabbitMQ Cluster Operator | **2.20.0** (ghcr.io) | (latest 2.21.0, registry moving to quay.io) |
+
+**Management-model correction (important):** the stack has **zero ArgoCD Application CRs** — it is
+deployed via **direct Helm releases** (19 releases via `install.sh`/`stack.sh`), not ArgoCD App-of-Apps.
+Local charts are thin wrappers (`<name>-0.1.0`) with a dependency on the upstream chart. **Chapter 3's
+"`argocd app sync`" convention is therefore replaced by `helm upgrade <release> k8/<path> -n <ns>`**
+(bump the wrapper's dependency version + `helm dependency update`). To be corrected in Ch.3 before Wave 2.
+
+#### 🔴 BLOCKER — OpenBao unseal keys lost (resolved via re-seed plan)
+
+- OpenBao is **initialized + sealed**; `k8/unseal.sh` keys **do not match the on-disk keyring**. Proven
+  by testing all 10 three-key combinations — every one fails identically at reconstruction with
+  `cipher: message authentication failed` (so it's a whole-set mismatch, not a mistyped share). The
+  saved root token is **`s.`-format (legacy Vault)** while OpenBao 2.5.1 issues `hvs.` tokens → the
+  saved creds are from a **different/older init** than the current data. Real keys appear unrecoverable.
+- **No data loss, though:** ESO is one-way (OpenBao→K8s) with `deletionPolicy: Retain`, so all values are
+  still live as K8s Secrets and were captured.
+- **Recovery = data-preserving re-init.** Phase 1 (non-destructive) **DONE 2026-06-05**:
+  - ✅ All **16 OpenBao paths reconstructed** from live K8s Secrets → `/tmp/openbao-reseed/reseed-map.json`
+    (`secret/{dns/google-cloud, k8s/registry, garage/{admin,admin-token,artifacts,loki,mimir,tempo,velero},
+    artifact-keeper/{app,postgres,meilisearch}, gitlab/{admin,runner}, grafana/admin,
+    marketplace-broker/openbao-token}`).
+  - ✅ 48 target secrets + all ExternalSecret specs + ClusterSecretStore exported to `/tmp/openbao-reseed/`.
+  - ✅ Direct **tar backup** of the OpenBao data volume (`/openbao/data`) saved locally (Velero couldn't —
+    see Garage finding).
+  - ✅ Phase 2 (destructive re-init) **DONE 2026-06-05**: uninstalled OpenBao, wiped PVCs, reinstalled,
+    `bao operator init` (new keys saved to gitignored `k8/unseal.sh` + recorded for password manager),
+    unsealed, bootstrapped (KV-v2 at `secret/` + Kubernetes auth + `external-secrets` policy/role),
+    **re-seeded all 18 paths** from `reseed-map.json`. Result: `ClusterSecretStore openbao` → **Valid**,
+    **48/48 ExternalSecrets `SecretSynced`**, OpenBao Initialized+Unsealed. **Zero data loss.**
+  - Forensic correction: a fresh OpenBao 2.5.1 init also produces an `s.`-prefixed token, so the token
+    format was NOT diagnostic — the real cause stands (keys never matched this data; proven by the
+    10-combo test).
+
+**Pins applied (the 4 floats → current versions, for deterministic installs):**
+- K3s → `INSTALL_K3S_VERSION="v1.34.5+k3s1"` (`k8/bootstrap/install-k3s.sh`)
+- Reflector → `--version 10.0.24` (`install.sh`)
+- CloudNativePG → `--version 0.27.1` (`install.sh`)
+- RabbitMQ Operator → pinned download `v2.20.0` (`install.sh`)
+
+**Side findings:**
+- 🔧 Velero **Garage BackupStorageLocation `Unavailable`** → cluster-wide Velero backups broken. **Fix before Wave 5** (it's a wave gate).
+- 🔧 Stack is **Helm-managed, not ArgoCD** (0 Application CRs). Ch.3 "`argocd app sync`" → use `helm upgrade <release> k8/<path>` (wrapper charts vendor the upstream dep). **Correct Ch.3 before Wave 2.**
+- Lima snapshot is `unimplemented` on the vz backend → VM-snapshot gate not available; rely on per-component backups + reproducible install.
+
+_Checklist:_
+- [x] Platform started (VM + cluster up) — OpenBao came up sealed; **recovered via re-init**
+- [x] Captured live versions of the 4 floats
+- [x] OpenBao recovery (re-init + re-seed, 48/48 ExternalSecrets synced)
+- [x] Pinned the 4 versions in git (as-is)
+- [x] Health baseline recorded (node Ready v1.34.5, 0 bad pods, OpenBao unsealed, 48/48 synced)
+- [x] Backups: OpenBao volume tar ✅ + reseed-map ✅ / Velero ❌ (Garage BSL down) / Lima snapshot ❌ (vz unsupported)
+- [x] Log committed + pushed
