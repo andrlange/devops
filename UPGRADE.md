@@ -1,0 +1,524 @@
+# Stack-Wide Upgrade — Planning & Scope
+
+> **Status:** Scoping / planning entrypoint. **Collect & plan only — no implementation yet.**
+> **Goal:** Coordinate a controlled upgrade of the *entire* DevOps platform — Lima VM → K3s
+> → all in-cluster components → Go service brokers → Spring Boot apps/kappman → the **remote
+> artifact-keeper** developer-platform server — without breaking any component of this repository.
+> **Last inventory:** 2026-06-04 (versions below reflect what is currently pinned in this repo).
+>
+> **Decisions locked (2026-06-04):**
+> 1. **Scope = latest everywhere** — bump every component to current latest stable.
+> 2. **Spring Boot / Spring apps follow separately** — a full Spring update week happens *next week*;
+>    kappman + petclinic (the Boot/Java/buildpack triple) are a **deferred follow-up wave**, planned
+>    here but implemented after the Spring release. Remember: Spring apps trail the platform upgrade.
+> 3. **artifact-keeper = patch-rebase + a re-platform, not a plain bump** — upstream is now **v1.2.0**,
+>    but we run `v1.1.0-rc.8-**patched**` with our own custom patches. Both the in-cluster images *and*
+>    the remote registry app must move to **1.2.0 with our 5 patches reconciled** (several likely now
+>    upstream → drop). **⚠️ v1.2.0 also REMOVES Meilisearch in favor of OpenSearch 2.x** — this is the
+>    biggest single item in the whole campaign (search-backend swap + reindex in *both* planes). See
+>    Chapter 2 → "artifact-keeper patch reconciliation". Treat as its own mini-project.
+> 4. **Unpinned components → pin-to-current first, then upgrade** (K3s, Reflector, CloudNativePG,
+>    RabbitMQ Operator): capture exact running versions from the live cluster, commit, *then* bump.
+> 5. **Plane B `otel/` LGTM aligned to in-cluster** monitoring versions.
+
+This document is the single source of truth for the upgrade campaign. Chapter 1 is the
+**complete component & dependency inventory** (the "what we must care about"). Later chapters
+will hold the ordering, risk analysis, and per-component upgrade procedures (to be filled in
+once we agree on target versions).
+
+---
+
+## Chapter 1 — Component & Dependency Inventory
+
+Everything that exists in this repo and must be considered before touching a single version.
+The platform is **two physically separate planes**:
+
+- **Plane A — Local K3s stack** (this is what `installer.sh` / `stack.sh` deploys into the Lima VM).
+- **Plane B — Remote developer-platform server** (Docker-Compose stacks under the repo root:
+  `artifactory/`, `otel/`, `router/`, `vault/`) — this is the **remote artifact-keeper** and its
+  surrounding edge/monitoring/secrets services that serve colleagues. Every image and artifact the
+  local stack consumes is pulled from here, so **Plane B must be upgraded with extreme care and
+  generally *first* for shared images, *last* for the registry app itself**.
+
+### 1.0 — Cross-cutting concerns (read before anything)
+
+| Concern | Detail | Why it matters for the upgrade |
+|---|---|---|
+| **Architecture suffix** | All images tagged `-arm64` (`ARCH=arm64` in `k8/config.env`). `k8/set-arch.sh` rewrites all `values.yaml`. | Every new image we mirror must exist as ARM64 and be re-tagged `-arm64`. |
+| **Private registry** | All images pulled from `artifactory.cfapps.cool/docker-local/` via pull secret `artifact-keeper-pull`. | A new version is unusable until it is **mirrored into the remote artifact-keeper**. This is the gating step for *every* image bump. |
+| **Chart = App version rule** | CLAUDE.md: "Helm chart versions must exactly match app versions — mismatches cause silent failures." | Every Helm bump must move chart *and* image together. |
+| **TLS / IngressRoute split** | Platform svcs use default TLSStore (`*.development.cfapps.cool`); app svcs use `wildcard-apps-tls` (`*.app.cfapps.cool`). | cert-manager / Traefik upgrades can break wildcard issuance. |
+| **Secrets via ESO** | No secrets in Git; OpenBao → ESO → K8s Secrets. | OpenBao / ESO upgrades can desync every dependent secret. |
+| **Storage = local-path** | No CSI snapshots; Velero uses Restic/Kopia. | StatefulSet image bumps (Postgres, GitLab, OpenBao, Garage) need data-migration care + a fresh Velero backup first. |
+| **Distribution artifacts** | `build-distribution.sh` → `dist/installer.sh` + `dist/stack.tgz`, uploaded to the remote generic repo with a version suffix. | Any repo change must be re-packaged and re-uploaded; bump version (currently **v1.1.2**). |
+
+### 1.1 — Plane A · Foundation (Lima VM + K3s)
+
+| # | Component | Current | Pinned in | Notes / dependents |
+|---|---|---|---|---|
+| 1 | **Lima VM** | Ubuntu 24.04 ARM64, vz, 8 CPU / 48 GiB / 200 GiB | `k8/bootstrap/lima.yaml`, `k8/config.env` | vzNAT `192.168.64.0/24`. Base of everything. Guest-OS / Lima upgrade is the riskiest single step. |
+| 2 | **K3s** | **unpinned** (`curl -sfL https://get.k3s.io`) | `k8/bootstrap/install-k3s.sh` | `--disable traefik,servicelb`. local-path at `/data/persistent`. **Must pin a version** before upgrading — currently floating. Drives the entire K8s API surface every chart depends on. |
+| 3 | **Kubernetes Reflector** | **unpinned** (`helm install ... emberstack/reflector`) | `k8/distribution/install.sh:1163` | Cross-namespace secret reflection. Should be pinned. |
+
+> ⚠️ Two **unpinned** components (K3s, Reflector). First action item: pin both so upgrades are deterministic.
+
+### 1.2 — Plane A · Infrastructure
+
+| Component | Image / App | Helm chart | Pinned in | Dependents |
+|---|---|---|---|---|
+| **MetalLB** | v0.15.3 | 0.15.3 | `k8/infrastructure/metallb/{Chart,values}.yaml` | LoadBalancer IPs for Traefik + GitLab SSH. |
+| **Traefik** | v3.6.10 | 39.0.5 | `k8/infrastructure/traefik/{Chart,values}.yaml` | Ingress for every platform service; TLSStore. |
+| **cert-manager** | v1.20.0 | 1.20.0 | `k8/infrastructure/cert-manager/{Chart,values}.yaml` | Wildcard certs via GCP Cloud DNS DNS-01. CRDs auto-installed. |
+
+### 1.3 — Plane A · Platform
+
+| Component | Image / App | Helm chart | Pinned in | Dependents |
+|---|---|---|---|---|
+| **ArgoCD** | v3.3.4 (redis 8.2.3) | 9.4.15 | `k8/platform/argocd/{Chart,values}.yaml` | GitOps app-of-apps; can reconcile/revert other upgrades. |
+| **External Secrets (ESO)** | v0.16.1 | 0.16.1 | `k8/platform/external-secrets/{Chart,values}.yaml` | Backed by OpenBao; feeds all secrets incl. registry pull secret. CRDs auto-installed. |
+| **Portainer** | 2.39.1 (app 2.39.0) | 239.0.2 | `k8/platform/portainer/{Chart,values}.yaml` | Management UI. |
+| **Garage (S3)** | v2.2.0 | (raw manifest, StatefulSet) | `k8/platform/garage/deployment.yaml:24` | **S3 backend for Velero, Loki, Mimir, Tempo, artifact-keeper.** High blast radius. |
+| **Technitium DNS** | 14.3.0 | (raw manifest) | `k8/platform/technitium/deployment.yaml:21` | Internal DNS zones. |
+| **Velero** | v1.18.0 (AWS plugin v1.14.0) | 12.0.0 (local `charts/velero`) | `k8/velero/{Chart,values}.yaml` | Backups → Garage. **Take a backup with the current version before any StatefulSet upgrade.** |
+| **Velero UI** | 0.10.1 (**no -arm64 suffix**) | (raw) | `k8/velero/ui/values.yaml:3` | Only non-arch-tagged image — verify ARM64 manifest on bump. |
+
+### 1.4 — Plane A · Secrets
+
+| Component | Image / App | Helm chart | Pinned in | Dependents |
+|---|---|---|---|---|
+| **OpenBao** | 2.5.1 | 0.8.0 | `k8/services/openbao/{Chart,values}.yaml` | Standalone, TLS off. **Root of trust** — ESO + every secret depends on it. Unseal keys live in a password manager. Upgrade = backup + careful unseal dance. |
+
+### 1.5 — Plane A · Monitoring (LGTM)
+
+| Component | Image / App | Helm chart | Pinned in | Notes |
+|---|---|---|---|---|
+| **Grafana** | 12.4.1 | 10.5.15 | `k8/monitoring/grafana/{Chart,values}.yaml` | Dashboards/datasources. |
+| **Loki** | 3.6.7 | 6.55.0 | `k8/monitoring/loki/{Chart,values}.yaml` | Garage bucket `loki-chunks`. |
+| **Mimir** | 3.0.4 | **raw Deployment** (not mimir-distributed) | `k8/monitoring/mimir/deployment.yaml:20` | Garage bucket `mimir`. |
+| **Tempo** | **2.9.0 running** / chart appVersion **2.10.3** ⚠️ | 1.24.4 | `k8/monitoring/tempo/{Chart,values}.yaml` | Garage bucket `tempo`. **Existing version mismatch — reconcile during upgrade.** |
+| **Alloy** | v1.14.1 | 1.6.2 | `k8/monitoring/alloy/{Chart,values}.yaml` | DaemonSet collector. |
+| **kube-state-metrics** | v2.18.0 | 7.2.2 | `k8/monitoring/kube-state-metrics/{Chart,values}.yaml` | Tracks K8s API objects → recheck on K3s bump. |
+| **node-exporter** | v1.10.2 | 4.52.2 | `k8/monitoring/node-exporter/{Chart,values}.yaml` | Host metrics. |
+
+### 1.6 — Plane A · Services (artifact-keeper in-cluster + GitLab)
+
+| Component | Image / App | Pinned in | Dependents |
+|---|---|---|---|
+| **artifact-keeper backend** | v1.1.0-rc.8-**patched** → target **1.2.0+patches** | `k8/services/artifact-keeper/artifact-keeper/deployment.yaml:48` | Needs Postgres + Meilisearch + Garage S3. **Upstream is now 1.2.0; we carry custom patches — rebase patches onto 1.2.0, drop any now-upstream.** Same image must be re-mirrored to Plane B. |
+| **artifact-keeper web** | v1.1.0-rc.8-**patched** → target **1.2.0+patches** | `.../deployment-web.yaml:22` | UI for above. Same patch-rebase concern. Upstream web CHANGELOG last seen at 1.1.0-rc.4. |
+| **PostgreSQL (a-k)** | 17.9 | `.../postgresql/statefulset.yaml:23` | StatefulSet — major-version bumps need `pg_upgrade`/dump. |
+| **Meilisearch** | v1.39.0 | `.../meilisearch/deployment.yaml:24` | **⚠️ REMOVED in artifact-keeper 1.2.0 → replaced by OpenSearch 2.x.** Not a bump — a search-backend swap + full reindex. Heavier (JVM) → recheck VM RAM. |
+| **Trivy Scanner** | 0.69.3 | `.../trivy/deployment.yaml:22` | Vuln DB; benign to bump. |
+| **GitLab CE** | 18.10.0-ce.0 | `k8/services/gitlab-ce/statefulset.yaml:23` | StatefulSet (data/config/logs). **One-minor-at-a-time upgrade path required** — never skip minors. |
+| **GitLab Runner** | alpine-v18.10.0 | chart 0.87.0 · `k8/services/gitlab-ce/runner/{Chart,values}.yaml` | K8s executor in `gitlab-runner-jobs`; auto-registered via `install.sh`. Keep within one minor of GitLab CE. |
+
+### 1.7 — Plane A · Apps (Korifi / Cloud Foundry stack)
+
+| Component | Current | Pinned in | Notes |
+|---|---|---|---|
+| **Korifi** | v0.18.0 (Helm tgz) | `k8/distribution/install.sh:2228/2234` | CF-on-K8s: api, controllers, kpack-image-builder, statefulset-runner. Depends on Contour gateway + kpack + cert-manager. |
+| **kpack** | 0.17.0 (ARM64, self-built) | `k8/services/kpack/build-arm64.sh:17`, `install.sh:2042` | **Go 1.24 self-build** (see 1.9). Builds app images. lifecycle pinned dynamically. |
+| **Contour** | v1.33.2 | `install.sh:1995-1999` | Gateway API for Korifi routes. |
+| **Envoy** | distroless-v1.35.9 | `install.sh:1998` | Ships with Contour quickstart. |
+| **Service Binding Runtime** | 1.0.0 | `install.sh:2090` | Korifi service bindings. |
+| **Paketo Java buildpack** | **21.4.0 (pinned)** | `install.sh:2208`, `k8/services/kpack/mirror-buildpacks.sh` | Pinned for Spring Boot 4.x (see memory). Other buildpacks (nodejs/ruby/go/php/httpd/procfile) = `latest`. |
+| **Paketo stacks** | build/run-jammy-full:latest | `install.sh:2215-2216` | ClusterBuilder `cf-kpack-cluster-builder`. |
+
+> **Known blocker (carry forward):** petclinic CF push is blocked by Paketo ca-certificates scanning
+> Korifi binding mounts; `BPL_SPRING_CLOUD_BINDINGS_DISABLED=true` is the current workaround. Revisit
+> when bumping the Java buildpack off 21.4.0.
+
+### 1.8 — Plane A · Service Brokers & Operators (Phase 7)
+
+| Component | Current | Pinned in | Notes |
+|---|---|---|---|
+| **CF Service Broker** (Go) | image 1.4.0-arm64 | `k8/services/cf-service-broker/` | Brokers postgresql/valkey/rabbitmq/s3. See 1.9. |
+| **CF Marketplace Broker** (Go) | image 1.0.0-arm64 | `k8/services/cf-marketplace-broker/` | Brokers postgres-ai/openbao-secrets/ai-connector. See 1.9. |
+| **CloudNativePG** | **unpinned** (`helm install cnpg/cloudnative-pg`) | `install.sh:2547-2548` | Operator for brokered Postgres (PG 18 / PG 17-AI). **Pin it.** |
+| **RabbitMQ Cluster Operator** | **unpinned** (`releases/latest`) | `install.sh:2557` | Operator for brokered RabbitMQ. **Pin it.** |
+| **Valkey** | 8.1-alpine | `cf-service-broker/src/main.go:34` (env `VALKEY_IMAGE`) | Provisioned per-instance. |
+
+> Two more **unpinned** operators (CloudNativePG, RabbitMQ). Both must be pinned before upgrade.
+
+### 1.9 — Go components we build ourselves (must rebuild + re-mirror)
+
+These are **first-party Go binaries** — upgrading the toolchain or deps means rebuild, re-tag `-arm64`, push to remote artifact-keeper, redeploy.
+
+| Module | Path | Go | Key deps | Builds |
+|---|---|---|---|---|
+| `github.com/cfapps/cf-service-broker` | `k8/services/cf-service-broker/src/go.mod` | **1.26.1** | brokerapi/v11 v11.0.16, k8s.io v0.35.3 | broker image 1.4.0 (Dockerfile `golang:1.26` → distroless static nonroot) |
+| `github.com/cfapps/cf-marketplace-broker` | `k8/services/cf-marketplace-broker/src/go.mod` | **1.26.1** | brokerapi/v11 v11.0.16, k8s.io v0.35.3 | broker image 1.0.0 |
+| `.../cf-marketplace-broker/test` | `.../test/go.mod` | 1.26.1 | lib/pq | integration tests |
+| `github.com/pivotal/kpack` (vendored/self-built) | `k8/services/kpack/src/go.mod` | **1.24** (toolchain 1.24.1) | lifecycle v0.20.3, go-containerregistry v0.20.2, k8s.io v0.30.11 | kpack ARM64 binaries (controller/webhook/build-init/...) |
+
+> ⚠️ The brokers pin `k8s.io v0.35.3` (≈ K8s 1.35) but kpack pins `k8s.io v0.30.11` (≈ K8s 1.30).
+> **The running K3s version must stay compatible with both client-go lines** — this is a key
+> constraint when choosing the target K3s version.
+> Also note `artifactory/source/backend/.assets/go/go.mod` (module `test-package`, Go 1.22) — a build asset, low priority.
+
+### 1.10 — Spring Boot / JVM apps
+
+| App | Spring Boot | Kotlin | Java | Build | Deploy | Pinned in |
+|---|---|---|---|---|---|---|
+| **kappman** (Korifi App Manager) | **4.0.3** | 2.3.10 | 25 (temurin) | Gradle | `cf push` (Paketo java, `BP_JVM_VERSION=25`) → `kappman.app.cfapps.cool` | `k8/apps/kappman/build.gradle.kts`, `manifest.yml`, `Dockerfile` |
+| **petclinic** (demo) | **4.0.4** | 2.3.10 | 25 | Gradle | `cf push` (Paketo java) → `petclinic.app.cfapps.cool` | `demos/petclinic/build.gradle.kts`, `manifest.yml` |
+
+kappman deps of note: `java-cfenv-boot:4.0.0`, Flyway + flyway-database-postgresql, Spring Security/JPA, CloudNativePG `kappman-db`, CF admin RoleBindings (`korifi` ns; refresh via `stack.sh:1180`). petclinic also pulls Spring AI `2.0.0-M3`.
+
+> Spring Boot 4.x ⇄ Java 25 ⇄ Paketo Java 21.4.0 are a **locked triple**. Don't bump one without the others.
+
+### 1.11 — Plane B · Remote developer-platform server (Docker-Compose, repo root)
+
+This is the **remote artifact-keeper** the user maintains for colleagues. Four independent compose stacks; each has its own `start.sh`/`stop.sh`/`backup.sh`. **Not** ARM-suffixed (server-side), **not** part of `stack.tgz` (excluded by `build-distribution.sh`).
+
+| Stack | Dir | Images | Role | Upgrade caution |
+|---|---|---|---|---|
+| **artifact-keeper** (remote registry) | `artifactory/` | backend (Rust/Axum), web (Next.js 15), **PostgreSQL 18**, Meilisearch, Trivy+Grype, nginx:alpine | THE registry every `-arm64` image is pulled from; generic repo serves `installer-*.sh`/`stack-*.tgz`. Backend CHANGELOG at 1.1.0-rc.8 (2026-03-17). | **→ target 1.2.0 + our patches** (see locked decision #3). **Upgrade last & with a full `scripts/backup.sh` first.** If it's down, the whole local stack can't pull. PG 18 already. 663 MB backup zip present. |
+| **OTEL / LGTM** | `otel/` | Mimir 2.15.0, Loki 3.4.2, Tempo 2.7.2, Grafana 11.5.2, otel-collector 0.120.0 | Remote monitoring (OpenBao + HAProxy dashboards). | **Align to in-cluster** (Loki 3.6.7 / Mimir 3.0.4 / Tempo target / Grafana 12.4.1) per decision #5. Note server-side (no `-arm64`). |
+| **Edge router** | `router/` | haproxy:3.1-alpine, otel-collector 0.120.0 | TLS/edge routing in front of the remote services. | Front door — upgrade in a window; certs via its own config. |
+| **OpenBao (remote)** | `vault/` | openbao/openbao:2.5.1, postgres:18, nginx:alpine, certbot/certbot:latest, otel-collector 0.120.0 | Remote secrets + Certbot TLS. | Matches in-cluster OpenBao 2.5.1 — keep them aligned. Backup zip `openbao-vault-2.5.1.zip` present. |
+
+### 1.12 — Distribution & packaging (must be re-cut after any change)
+
+| Artifact | Source | Current | Notes |
+|---|---|---|---|
+| `installer.sh` (host bootstrap) | `installer.sh` (root) | banner "v1.0" | Pre-flight: macOS 26.0+, M4+, 64 GB RAM, 500 GB disk; tools incl. **Go 1.26**, crane, CF CLI, Helm, kubectl. |
+| `k8/distribution/install.sh` | in-tree | display "V1.0.0" | The big phased installer (Phases 1–8) — every pinned version above ultimately flows through here. |
+| `dist/installer.sh` + `dist/stack.tgz` | `build-distribution.sh` | **v1.1.2** | Packs `k8/` + `demos/` + `GETTING_STARTED.md`; excludes Plane B dirs, `.env`, `.git`. Upload to remote generic repo with version suffix. |
+| Upgrade notes | `UPGRADE-v1.1.2.md` | v1.1.2 | Per-release upgrade guide pattern (keep this convention). |
+
+---
+
+## Dependency & ordering map (for later chapters)
+
+Upgrade waves implied by the above (top = do first):
+
+```
+Plane B shared images first ──► (mirror new -arm64 images into remote artifact-keeper)
+        │                         this is the prerequisite for EVERY Plane A image bump
+        ▼
+1. Lima VM / guest OS                 (host window; snapshot VM first)
+2. K3s  (PIN IT)                      (gates client-go: brokers@1.35 vs kpack@1.30)
+3. Reflector (PIN) ─ MetalLB ─ Traefik ─ cert-manager
+4. OpenBao  ──► ESO                   (root of trust; backup + unseal plan)
+5. Garage  (S3 backend)              ──► Loki / Mimir / Tempo / Velero / artifact-keeper
+6. ArgoCD, Portainer, Technitium, Velero(+UI)
+7. Monitoring (Grafana/Loki/Mimir/Tempo/Alloy/KSM/node-exporter) — fix Tempo 2.9.0↔2.10.3 drift
+8. artifact-keeper (in-cluster) + Postgres 17.9 + Meilisearch + Trivy
+9. GitLab CE (one minor at a time) + Runner
+10. Contour/Envoy ─ kpack (Go 1.24 rebuild) ─ Korifi ─ buildpacks/stacks
+11. CloudNativePG (PIN) ─ RabbitMQ Operator (PIN) ─ Valkey
+12. Go brokers (rebuild Go 1.26, re-mirror, redeploy)
+13. Re-cut distribution (bump version) ─► upload to remote generic repo
+14. Plane B: align `otel/` LGTM, upgrade `router/` + remote OpenBao, then **remote artifact-keeper → 1.2.0+patches LAST** (full backup first)
+15. **[DEFERRED — next week]** Spring apps wave: kappman + petclinic (Boot/Java/buildpack locked triple), after the upstream Spring update week
+```
+
+## Decisions made & remaining inputs for Chapter 2
+
+**Locked (see header):** scope = latest everywhere · Spring apps = deferred follow-up wave ·
+artifact-keeper = rebase patches onto 1.2.0 · 4 unpinned = pin-to-current-then-upgrade ·
+Plane B `otel/` = align to in-cluster.
+
+**Still to determine when we write target versions:**
+1. **Target K3s line** — must satisfy both broker client-go (v0.35.x) and kpack client-go (v0.30.x).
+   Pick the K8s minor, then verify kpack supports it (may force a kpack bump → Go bump). This is the
+   linchpin for the whole "latest everywhere" plan.
+2. **artifact-keeper patch reconciliation** — diff our `v1.1.0-rc.8-patched` against upstream 1.2.0;
+   classify each patch as (a) now upstream → drop, (b) still needed → re-apply, (c) obsolete. Needs
+   the patch list / source under `artifactory/source/`.
+3. **Backup/rollback gate** — Velero backup + Plane B `backup.sh` + Lima VM snapshot are mandatory
+   pre-steps for each StatefulSet/registry wave. Define the rollback checkpoint per wave.
+4. **Spring wave timing** — confirm exact target Boot/Java/Paketo-Java versions once next week's
+   Spring release lands; revisit the petclinic ca-certificates binding-mount blocker then.
+
+---
+
+## Chapter 2 (partial) — Target Kubernetes line & client-go compatibility
+
+> Research completed 2026-06-04 (web sources at end). This settles the linchpin question:
+> *which K3s/K8s line can we run such that the Go brokers, Korifi, and kpack all function.*
+
+### The three client-go anchors we must satisfy
+
+| Component | We control it? | client-go (current) | Go | Source |
+|---|---|---|---|---|
+| **cf-service-broker / cf-marketplace-broker** | **Yes** (self-built) | **v0.35.3** (~K8s 1.35) | 1.26.1 | our `go.mod` |
+| **Korifi** v0.18.0 (latest) | No (upstream) | **v0.35.2** (~K8s 1.35), imports `pivotal/kpack v0.17.1` | 1.25.7 | korifi v0.18.0 `go.mod` |
+| **kpack** | Partly (we self-build ARM64 from src) | **v0.30.11** (~K8s 1.30) in our src / **0.34.3** on upstream `main`, but newest *release* v0.17.1 is still ~0.30 | 1.24 | our src + upstream |
+
+### Landscape (latest available, June 2026)
+
+- **K3s latest = v1.36.x** (K8s 1.36 GA 2026-04-22; latest patch ≥ v1.36.1+k3s1, 2026-05-13). Actively supported K8s minors: **1.34 / 1.35 / 1.36**.
+- **client-go official skew policy:** a client is supported only **within ±1 minor** of the kube-apiserver.
+- **Korifi latest = v0.18.0** — we are **already on it**; no Korifi bump needed. It uses client-go 0.35.2 → in-policy for 1.34–1.36.
+- **kpack latest *release* = v0.17.1** (Dec 2024), still on client-go ~0.30. kpack `main` has moved to **client-go 0.34.3 / Go 1.24.5** but is **unreleased** — there is **no kpack release within ±1 of K8s 1.36**. (kpack v0.17.0+ also moved its images to **ghcr.io** — relevant to our mirroring step.)
+
+### The core finding
+
+**Strict "everything inside the official ±1 client-go skew" is NOT achievable** with today's released
+components: the brokers want apiserver ≥ 1.34 (client-go 0.35), while the newest kpack *release*
+(0.17.1, client-go ~0.30) is only in-policy up to ~K8s 1.31. Those windows don't overlap. So the
+target is a **practical** compatibility decision, not a policy-clean one.
+
+This is acceptable because **kpack only touches ultra-stable APIs** (pods, secrets, configmaps,
+serviceaccounts + its own `*.kpack.io` CRDs), which is why it already runs today against our
+**unpinned/floating K3s (currently ~1.36) on client-go 0.30** without issue. Wide skew is a real
+support-policy gap but a low *practical* risk for kpack specifically.
+
+### Recommendation — **target K3s v1.36.x (latest patch, pinned)**
+
+Rationale:
+1. Satisfies the locked "latest everywhere" decision.
+2. **Brokers** (client-go 0.35.3, easily bumped to 0.36 since we build them on Go 1.26) → within ±1 of 1.36 ✓.
+3. **Korifi v0.18.0** (client-go 0.35.2) → within ±1 of 1.36 ✓, and already latest.
+4. **kpack** is the only out-of-policy piece — but it's pinned to 0.17.1 *by Korifi anyway*, uses only stable APIs, and already runs at higher skew today. Net skew actually **improves** vs the current floating state once we pin.
+
+**kpack handling under this target (do all three):**
+- Bump our self-built kpack **0.17.0 → 0.17.1** (matches Korifi v0.18.0's pinned kpack, picks up lifecycle 0.20.12 + the **ghcr.io** image source for mirroring).
+- **Pin K3s** to a specific 1.36 patch (stop floating) so the skew is known and stable.
+- **Track upstream** `buildpacks-community/kpack` for the first tagged release > 0.17.1 carrying client-go ≥ 0.34; adopt it when it lands to close the policy gap. (Optionally we *could* rebuild 0.17.x src with a bumped client-go ourselves since we own the src tree, but that diverges from what Korifi tests against — only do it if a real skew bug appears.)
+
+**Conservative fallback — K3s v1.35.x:** if we want every first-party + Korifi client *exactly* in
+policy, 1.35 makes brokers (0.35) and Korifi (0.35) an exact match and leaves only kpack out of
+policy (same as always). This is the lower-risk choice but is one minor behind "latest." Recommend
+1.36.x unless a 1.36-specific incompatibility surfaces during the monitoring/Korifi waves.
+
+### Go toolchains (align during rebuilds)
+
+Brokers Go 1.26.1 · Korifi Go 1.25.7 · kpack Go 1.24(.5) · installer requires Go 1.26. No conflict;
+keep brokers on Go 1.26.x, leave kpack on the Go version its release ships with.
+
+#### Sources
+- K3s releases / 1.35 & 1.36: <https://docs.k3s.io/release-notes/v1.36.X>, <https://github.com/k3s-io/k3s/releases>, <https://docs.k3s.io/blog/2026/01/15/K3s-1.35-release>
+- Kubernetes version-skew policy: <https://kubernetes.io/releases/version-skew-policy/>, <https://kubernetes.io/releases/>
+- kpack releases & go.mod (main → client-go 0.34.3): <https://github.com/buildpacks-community/kpack/releases>, <https://github.com/buildpacks-community/kpack/blob/main/go.mod>
+- Korifi v0.18.0 go.mod (client-go 0.35.2, pivotal/kpack v0.17.1): <https://github.com/cloudfoundry/korifi/releases>
+
+## Chapter 2 (partial) — Should we fork kpack for K8s 1.36?
+
+**Short answer: no — a hard fork is the wrong tool here.** It would solve a *policy* gap, not a
+*functional* one, and it's both harder and lower-value than it looks.
+
+Why not:
+1. **No real failure to fix.** kpack only uses ultra-stable APIs (pods/secrets/configmaps/SAs + its
+   own `*.kpack.io` CRDs). It already runs against our floating ~1.36 cluster today. The 1.36 problem
+   is a support-policy skew, not a broken integration.
+2. **Korifi pins kpack for us anyway.** Korifi v0.18.0 depends on `github.com/pivotal/kpack v0.17.1`
+   as a Go library — its kpack-image-builder is compiled against the 0.17.1 API types. A divergent
+   fork risks CRD/type drift against what Korifi expects, so we're effectively constrained to the
+   0.17.x CRD surface regardless.
+3. **The dependency bump is real work and upstream hasn't finished it either.** kpack's own `main` has
+   only reached **client-go 0.34.3 / Go 1.24.5** (still 2 minors behind 1.36) despite 1.36 being out
+   ~2 months — it's bounded by its `knative.dev/pkg` dependency (which vendors matching k8s libs) and
+   the porting effort. A fork jumping 0.30→0.36 would have to do dependency surgery (incl. a
+   knative.dev/pkg that supports 0.36, which may not exist yet) that upstream itself hasn't shipped.
+4. **Perpetual maintenance.** A fork means we own every future rebase — security fixes, lifecycle
+   bumps, the ghcr.io migration. For a single-maintainer, colleague-facing platform that's a bad trade.
+
+Better options, in order of preference:
+
+| Option | What | Skew vs 1.36 | Maintenance | When |
+|---|---|---|---|---|
+| **A. Release + pin + watch** *(recommended)* | Build kpack **0.17.1** (matches Korifi), pin K3s to a 1.36 patch, watch `buildpacks-community/kpack` releases; adopt the first release with client-go ≥0.34 when it ships. | ~6 minors (works in practice) | none | now |
+| **B. Track upstream `main`** | We already self-build ARM64 from src — build from a *pinned `main` commit* (client-go 0.34.3) instead of a tag. This is "vendor newer source," **not a fork** (no divergent patches). | ~2 minors | low (bump commit) | if we want the gap smaller; verify Korifi 0.18.0 still accepts main's CRDs |
+| **C. Drop to K3s 1.35** | Conservative target line; brokers + Korifi become exact-match, kpack unchanged. | kpack only, as always | none | if a 1.36-specific issue appears |
+| **D. Minimal fork** | Only if a *real* 1.36 incompatibility appears **and** upstream is unresponsive: fork, bump only the deps, upstream the PR, retire the fork once merged. | 0 | high (temporary) | last resort |
+
+**Recommendation:** Option **A** now (it strictly improves on today's floating state), keep **B** in
+the back pocket if we want to shrink the skew, and treat a fork (**D**) as a last resort tied to an
+actual bug — not a preemptive project.
+
+---
+
+## Chapter 2 (partial) — artifact-keeper patch reconciliation onto v1.2.0
+
+> Investigated 2026-06-04. **Good news:** the "patched" build is clean and reproducible — a
+> clone→patch→build→push pipeline driven by discrete patch files. **Bad news:** v1.2.0 is **not a
+> version bump, it's a re-platform** (see ⚠️ below).
+
+### How our patched build actually works
+
+- `artifactory/source/backend` and `.../web` are **upstream git checkouts**
+  (`github.com/artifact-keeper/artifact-keeper{,-web}.git`); the parent `andrlange/artifactory` repo
+  tracks only our **patch files** + the build pipeline.
+- `artifactory/scripts/build-containers.sh`: `clone` does `git clone --branch <REF>` then
+  `git apply` each `source/patches/{backend,web}/*.patch`; image tag is auto-derived as
+  **`<upstream-git-tag>-patched`** (so a v1.2.0 checkout produces `1.2.0-patched` automatically).
+- So "rebase onto 1.2.0" = point `BACKEND_REF`/`WEB_REF` at the **v1.2.0** tags, re-apply the 5
+  patches, fix the ones that no longer apply, rebuild, re-mirror.
+
+### The 5 patches and their likely fate on v1.2.0
+
+| Patch | What it does | Likely status on 1.2.0 | Action |
+|---|---|---|---|
+| **be/001** `fix-token-list-revoked-filter` | adds `AND revoked_at IS NULL` to token list query (token_service.rs) + sqlx cache | token area reworked upstream (v1.1.9 "refresh-token rotation via JTI blocklist", credential invalidation) → **likely upstream or code moved** | try apply; if fails, verify upstream behavior → **probably drop** |
+| **be/002** `fix-user-tokens-list-revoked-filter` | same filter in users.rs handler + sqlx cache | same as above | same → **probably drop** |
+| **be/003** `add-api-token-support-for-docker-v2-token` | accept API token as password in `docker login` Basic Auth on `/v2` token endpoint (oci_v2.rs) | v1.2.0 adds **"Repository-scoped access token management"** → feature area changed; may now be native | **rebase carefully**; may become partly/fully upstream |
+| **web/001** `fix-permissions-target-select` | permissions page: target as repo dropdown vs text field | UI; uncertain | try apply; rebase if needed |
+| **web/002** `fix-select-in-dialog-z-index` | z-index fix + drops `listScanConfigs` SDK import | adapts to SDK shape; SDK likely changed in 1.2.0 | **likely needs rebase** |
+
+> The clean test for each patch: `git apply --3way` against the v1.2.0 checkout. Clean apply → keep.
+> Reject → either the fix is upstream (drop it) or the code moved (manual rebase). Backend patches
+> also ship `.sqlx/*.json` query-cache files — after rebasing, **regenerate with `cargo sqlx prepare`**
+> against the 1.2.0 schema or the offline build will fail.
+
+### ⚠️ The big one: v1.2.0 removes Meilisearch in favor of OpenSearch 2.x
+
+This is the dominant cost of the artifact-keeper upgrade, **far bigger than the patch rebase**:
+
+- **Plane A (in-cluster):** `k8/services/artifact-keeper/meilisearch/` must be **replaced by OpenSearch
+  2.x** — new Deployment/StatefulSet (+ PVC, +heap/JVM sizing), new env wiring on the backend
+  (`MEILI_*` → OpenSearch endpoint/creds), and the init container in `deployment.yaml` that probes
+  Meilisearch. Search index must be **rebuilt/reindexed** (not migrated). OpenSearch is heavier (JVM)
+  than Meilisearch — recheck Lima VM RAM headroom (48 GiB).
+- **Plane B (remote registry):** `artifactory/docker-compose.yml` Meilisearch service → OpenSearch 2.x
+  + its `.env` wiring + reindex.
+- Other 1.2.0 headliners to fold in: virtual-repo aggregation, streaming OCI uploads, staging/
+  promotion gates, password policies, repo-scoped tokens (see be/003 overlap), SBOM declared-deps.
+
+### Proposed artifact-keeper sub-sequence (slots into wave 14/15)
+
+1. Full Plane B `scripts/backup.sh` + Velero backup of in-cluster artifact-keeper PVCs.
+2. `build-containers.sh clone` with `REF=v1.2.0`; `git apply --3way` patches; triage per table above;
+   regenerate sqlx cache; rebuild → get `1.2.0-patched` images.
+3. Stand up **OpenSearch 2.x** (Plane B compose first, then Plane A manifests); reindex.
+4. Roll backend+web to `1.2.0-patched`, pointed at OpenSearch; verify search, docker login (be/003),
+   permissions UI (web/001).
+5. Re-mirror images + re-push distribution; update `k8/services/artifact-keeper/*` and remote compose.
+
+## Chapter 2 — Target Version Matrix (latest stable, researched 2026-06-04)
+
+> "Latest everywhere" per locked decision. Each row: **current → target**, Helm chart where relevant
+> (chart *and* appVersion must move together), and the migration flag. **Spring apps, Java buildpack,
+> and Korifi are intentionally NOT bumped** (deferred / already-latest). Re-mirror every new `-arm64`
+> image into the remote artifact-keeper before deploying it.
+
+### 🔴 High-risk upgrades (need their own procedure + backup + rollback)
+
+| Component | Jump | Why it's high-risk |
+|---|---|---|
+| **External Secrets Operator** | v0.16.1 → **v2.5.0** | Major re-versioning (0.16→2.x). CRD `external-secrets.io/v1beta1` → **v1**; migrate manifests + upgrade CRDs *before* controller. Mis-step desyncs **every** secret. Highest-risk item in the campaign. |
+| **artifact-keeper** | rc.8-patched → **1.2.0-patched** | **Meilisearch → OpenSearch 2.x re-platform** + 5-patch rebase. See dedicated Chapter 2 section. |
+| **Grafana + Loki Helm charts** | repo move | OSS `grafana`/`loki` charts **left the `grafana` repo** — must switch to **`grafana-community`** repo (`https://grafana-community.github.io/helm-charts`). Loki chart renumbers 6.x → 17.x; Grafana app 13 removes AngularJS. |
+| **Mimir (in-cluster)** | 3.0.4 → **3.1.0** | TSDB blocks must be **index v2**; store-gateways drop v1 index-header. Compact/migrate old Garage blocks first. Removed flags (`-target=flusher`, response-streaming flag). |
+| **Mimir (remote Plane B)** | 2.15.0 → **3.0.x** | **Major 2→3**: config now ConfigMap-by-default (set `configStorageType: Secret` if external), MQE default engine, blue/green migration recommended. |
+| **GitLab CE** | 18.10 → **19.0.1** | Must pass **required stop 18.11.4**; major 19.0. Path below. |
+| **OpenBao chart** | 0.8.0 → **0.28.3** | Chart is *wildly* behind (0.8.0 shipped appVersion 2.1.1; we override image to 2.5.1). Diff `values.yaml` against 0.28.3 defaults; back up `file` storage PV; have unseal keys ready. |
+| **Technitium DNS** | 14.3.0 → **15.2.0** | Major v15; snapshot PV (config auto-migrates forward, not downgrade-safe). |
+| **Traefik chart** | 39.0.5 → **40.2.0** | Major chart bump; review `values.yaml` schema (ports/providers/CRD handling). App stays v3.x. |
+| **OTEL Collector (Plane B)** | 0.120.0 → **0.153.0** | 33 minors of accumulated breaking changes; audit every receiver/processor/exporter in the pipeline config (Kafka franz-go only, key renames). |
+
+### 2.1 Foundation
+
+| Component | Current | Target | Notes |
+|---|---|---|---|
+| Lima (host tool) | (in use) | **v2.1.2** | Lima 2.x changed `lima.yaml` schema/defaults — validate `bootstrap/lima.yaml` against 2.x before recreating VM. |
+| K3s | unpinned | **v1.36.x (pin latest 1.36 patch, ≥1.36.1+k3s1)** | Stop floating `get.k3s.io`. See Chapter 2 client-go analysis. |
+| Kubernetes Reflector | unpinned | chart **10.0.47** / app **10.0.47** | Pin it. |
+
+### 2.2 Infrastructure
+
+| Component | Current (app / chart) | Target (app / chart) | Notes |
+|---|---|---|---|
+| MetalLB | v0.15.3 / 0.15.3 | **v0.16.1 / 0.16.1** | Minor; re-apply CRDs (chart won't auto-upgrade them). |
+| Traefik | v3.6.10 / 39.0.5 | **v3.7.1 / 40.2.0** | 🔴 major chart bump — values schema review. |
+| cert-manager | v1.20.0 / 1.20.0 | **v1.20.2 / 1.20.2** | Patch-only, safe. |
+
+### 2.3 Platform
+
+| Component | Current (app / chart) | Target (app / chart) | Notes |
+|---|---|---|---|
+| ArgoCD | v3.3.4 / 9.4.15 | **v3.4.3 / 9.5.18** | Minor; sync updated CRDs manually. |
+| External Secrets | v0.16.1 / 0.16.1 | **v2.5.0 / 2.5.0** | 🔴 major; CRD v1beta1→v1 migration. |
+| Portainer | 2.39.1 / 239.0.2 | **2.39.3 / 239.3.0** | Patch. |
+| Garage | v2.2.0 / raw | **v2.3.0 / raw** | "No breaking changes from 2.2.0." Drop-in. |
+| Technitium DNS | 14.3.0 / raw | **15.2.0 / raw** | 🔴 major v15; snapshot PV. |
+| Velero | v1.18.0 / 12.0.0 | **v1.18.1 / 12.0.2** | Patch. AWS plugin **v1.14.0 → v1.14.1**. |
+| Velero UI | 0.10.1 / (raw) | image **0.10.1** / chart **0.14.0** (appVersion 0.10.0) | Chart lags app — deploy chart 0.14.0, override `image.tag: 0.10.1`. |
+
+### 2.4 Secrets
+
+| Component | Current (app / chart) | Target (app / chart) | Notes |
+|---|---|---|---|
+| OpenBao | 2.5.1 (image override) / 0.8.0 | **v2.5.4 / 0.28.3** | 🔴 chart far behind — diff values; standalone `file` backend = no Raft migration, but backup PV + unseal keys ready. |
+
+### 2.5 Monitoring (LGTM) — ⚠️ chart repo migration for Grafana & Loki
+
+| Component | Current (app / chart) | Target (app / chart) | Notes |
+|---|---|---|---|
+| Grafana | 12.4.1 / 10.5.15 (old repo) | **12.4.3** (or 13.0.1) / chart **12.4.2** @ `grafana-community` | 🔴 switch repo. Staying 12.4.x avoids Angular-removal pain of 13; pick during this wave. |
+| Loki | 3.6.7 / 6.55.0 (old repo) | **3.7.2 / 17.1.6** @ `grafana-community` | 🔴 switch repo (chart renumbers to 17.x). No Garage S3 schema break. |
+| Mimir | 3.0.4 / raw | **3.1.0 / raw** | 🔴 TSDB index v2 required; migrate old blocks. Classic S3/Garage still supported (no forced Kafka). |
+| Tempo | 2.9.0 / 1.24.4 | **2.10.5 / chart 2.2.0** @ `grafana-community` | Fixes the 2.9.0↔2.10.3 drift. **Avoid Tempo 3.0** (architecture rewrite, vParquet4, no downgrade). |
+| Alloy | v1.14.1 / 1.6.2 | **v1.16.2 / 1.8.2** | Stays in `grafana` repo. Chart appVersion v1.16.1 — override image to v1.16.2 if wanted. |
+| kube-state-metrics | 2.18.0 / 7.2.2 | **2.19.0 / 7.4.0** | Clean. |
+| node-exporter | 1.10.2 / 4.52.2 | **1.11.1 / 4.55.0** | Clean. |
+
+### 2.6 Services
+
+| Component | Current | Target | Notes |
+|---|---|---|---|
+| PostgreSQL (in-cluster a-k) | 17.9 | **17.10** | Stay on 17.x (PG17 supported to Nov 2029). 18.x deferred — needs pg_upgrade. |
+| Meilisearch | v1.39.0 | **removed → OpenSearch 2.x** | Part of artifact-keeper 1.2.0 re-platform. |
+| Trivy | 0.69.3 | **0.71.0** | Minor. |
+| artifact-keeper backend/web | rc.8-patched | **1.2.0-patched** | See dedicated section. |
+| GitLab CE | 18.10.0-ce.0 | **19.0.1-ce.0** | 🔴 path: **18.10.7 → 18.11.4 (required stop) → 19.0.1**. Finish background migrations at each stop. |
+| GitLab Runner | 18.10.0 / 0.87.0 | **19.0.1 / 0.89.1** | Step alongside CE (intermediate chart 0.88.3 = 18.11.x available). |
+
+### 2.7 Apps (Korifi / CF)
+
+| Component | Current | Target | Notes |
+|---|---|---|---|
+| Korifi | v0.18.0 | **v0.18.0 (no change)** | Already latest. |
+| kpack (self-built) | 0.17.0 | **0.17.1** | Matches Korifi's pinned kpack; lifecycle 0.20.12; images now on **ghcr.io**. See fork analysis. |
+| Contour | v1.33.2 | **v1.33.5** | Patch; pairs with Envoy v1.35.10. |
+| Envoy | distroless-v1.35.9 | **distroless-v1.35.10** | Contour-pinned — do NOT jump to 1.38 independently. |
+| Service Binding Runtime | 1.0.0 | **1.0.0 (no change)** | Already latest. |
+| Paketo Java buildpack | 21.4.0 (pinned) | **keep 21.4.0** (latest is 22.0.0 — reference only) | DEFERRED to Spring wave; revisit ca-cert binding-mount blocker then. |
+| Paketo jammy-full stacks | latest | **0.1.167** (reference) | Build/run share tag. |
+
+### 2.8 Service Brokers & Operators
+
+| Component | Current | Target | Notes |
+|---|---|---|---|
+| CloudNativePG | unpinned | **1.29.1 / chart 0.28.2** | Pin it. CRDs auto-applied by operator. |
+| RabbitMQ Cluster Operator | unpinned (`latest`) | **2.21.0** | Pin it. ⚠️ **registry moved to `quay.io/rabbitmqoperator/cluster-operator`** (Docker Hub stopped at 2.19.2) — update mirror source. Upgrade triggers rolling reconcile of managed clusters. |
+| Valkey | 8.1-alpine | **8.1.8-alpine** | Pin exact patch. |
+| cf-service-broker (Go) | 1.4.0 | rebuild → bump client-go **0.35.3 → 0.36.1**, Go **1.26.4** | Re-tag `-arm64`, re-mirror, redeploy. |
+| cf-marketplace-broker (Go) | 1.0.0 | rebuild → client-go **0.36.1**, Go **1.26.4** | Same. |
+
+### 2.9 Go toolchain & libraries
+
+| Item | Current | Target | Notes |
+|---|---|---|---|
+| Go | 1.26.1 | **1.26.4** | Patch; no language breaks. |
+| k8s.io/client-go (brokers) | v0.35.3 | **v0.36.1** | Match K3s 1.36. |
+| brokerapi | v11.0.16 | **v11.0.16 (stay on v11)** | v12.0.1 exists (major, import path `/v12`) — optional, not needed. |
+| kpack client-go (self-built) | v0.30.11 | keep with release (0.17.1) / optionally main's 0.34.3 | Per fork analysis. |
+
+### 2.10 Plane B — remote developer-platform server
+
+| Image | Current | Target | Notes |
+|---|---|---|---|
+| OpenSearch (new, replaces Meilisearch) | — | **2.19.5** (2.x line) | JVM heap `-Xms=-Xmx` ≈ 50% container RAM; ~2× heap total RAM. ARM64 yes. |
+| HAProxy (router) | 3.1-alpine | **3.2.19-alpine (LTS)** | Use 3.2 LTS, not the brand-new 3.4. |
+| OTEL Collector Contrib | 0.120.0 | **0.153.0** | 🔴 audit pipeline config (33 minors of breaks). |
+| Certbot | latest | **5.6.0** | — |
+| Nginx | alpine | **1.30.2-alpine (stable)** | — |
+| PostgreSQL (remote vault/artifactory) | 18 | **18.4** | Latest 18 patch. |
+| **Remote LGTM align →** Grafana | 11.5.2 | **12.4.3** | 🔴 major 11→12 (Angular removed; audit dashboards). |
+| Remote LGTM align → Loki | 3.4.2 | **3.6.7** | Promtail deprecated → Alloy. |
+| Remote LGTM align → Tempo | 2.7.2 | **2.10.5** | ⚠️ tenant-ID validation now enforced — check existing tenant IDs. |
+| Remote LGTM align → Mimir | 2.15.0 | **3.0.x** | 🔴 major 2→3 (see high-risk table). |
+
+### 2.11 Distribution
+
+After all of the above: re-run `build-distribution.sh`, **bump version v1.1.2 → v1.2.0** (aligns with
+artifact-keeper), upload `installer-v1.2.0.sh` + `stack-v1.2.0.tgz` to the remote generic repo, write
+`UPGRADE-v1.2.0.md`. Update `installer.sh`/`install.sh` banner versions and the Go 1.26 pre-flight to 1.26.4.
+
+---
+
+*Next: Chapter 3 — per-wave upgrade procedures (commands, verification, rollback) following the wave
+map, starting with the pin-to-current commit and the ESO v1beta1→v1 migration as the first risky gate.*
