@@ -1,0 +1,112 @@
+<h2>kappman — Feature-Bereiche</h2>
+<p class="subtitle">Übersicht aller Bereiche mit ihren Funktionen</p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-family:system-ui;font-size:13px;">
+
+  <!-- Dashboard -->
+  <div style="background:#1e2626;border:1px solid #2a3838;border-radius:8px;padding:16px;border-left:3px solid #6db33f;">
+    <div style="color:#6db33f;font-weight:bold;font-size:15px;margin-bottom:8px;">⊞ Dashboard</div>
+    <ul style="color:#9ab89a;margin:0;padding-left:18px;line-height:1.8;">
+      <li>Org/Space/App/Service Counters</li>
+      <li>Korifi Health Summary (API, Gateway, kpack)</li>
+      <li>Recent Activity Feed</li>
+      <li>Quick Actions (je nach Rolle)</li>
+    </ul>
+  </div>
+
+  <!-- Organizations -->
+  <div style="background:#1e2626;border:1px solid #2a3838;border-radius:8px;padding:16px;border-left:3px solid #e8a735;">
+    <div style="color:#e8a735;font-weight:bold;font-size:15px;margin-bottom:8px;">◎ Organizations</div>
+    <ul style="color:#9ab89a;margin:0;padding-left:18px;line-height:1.8;">
+      <li>Liste aller Orgs mit Space-Count</li>
+      <li>K8s Namespace Mapping anzeigen</li>
+      <li>Admin: Org erstellen/löschen</li>
+      <li>Drill-down → Spaces der Org</li>
+    </ul>
+  </div>
+
+  <!-- Spaces -->
+  <div style="background:#1e2626;border:1px solid #2a3838;border-radius:8px;padding:16px;border-left:3px solid #4a9eff;">
+    <div style="color:#4a9eff;font-weight:bold;font-size:15px;margin-bottom:8px;">▤ Spaces</div>
+    <ul style="color:#9ab89a;margin:0;padding-left:18px;line-height:1.8;">
+      <li>Spaces mit App/Service Counts</li>
+      <li>K8s Namespace Mapping anzeigen</li>
+      <li>Admin: Space erstellen/löschen</li>
+      <li>Drill-down → Apps & Services im Space</li>
+    </ul>
+  </div>
+
+  <!-- Applications -->
+  <div style="background:#1e2626;border:1px solid #2a3838;border-radius:8px;padding:16px;border-left:3px solid #6db33f;">
+    <div style="color:#6db33f;font-weight:bold;font-size:15px;margin-bottom:8px;">⬡ Applications</div>
+    <ul style="color:#9ab89a;margin:0;padding-left:18px;line-height:1.8;">
+      <li>App-Liste mit Status-Badge (STARTED/STOPPED/STAGING)</li>
+      <li>App Detail: Instances, Memory, Disk, Routes</li>
+      <li>Start / Stop / Restart / Restage (HTMX)</li>
+      <li>Scale Instances (HTMX)</li>
+      <li>Environment Variables verwalten</li>
+      <li>Recent Logs anzeigen (HTMX polling)</li>
+      <li>Bound Services anzeigen</li>
+      <li>Admin: App löschen</li>
+    </ul>
+  </div>
+
+  <!-- Services -->
+  <div style="background:#1e2626;border:1px solid #2a3838;border-radius:8px;padding:16px;border-left:3px solid #c678dd;">
+    <div style="color:#c678dd;font-weight:bold;font-size:15px;margin-bottom:8px;">♦ Services</div>
+    <ul style="color:#9ab89a;margin:0;padding-left:18px;line-height:1.8;">
+      <li>Service Instances im Space</li>
+      <li>Plan, Status, Bindings anzeigen</li>
+      <li>Service Instance erstellen (aus Marketplace)</li>
+      <li>Service Binding erstellen/löschen</li>
+      <li>Service Instance löschen</li>
+    </ul>
+  </div>
+
+  <!-- Marketplace -->
+  <div style="background:#1e2626;border:1px solid #2a3838;border-radius:8px;padding:16px;border-left:3px solid #e06c75;">
+    <div style="color:#e06c75;font-weight:bold;font-size:15px;margin-bottom:8px;">◈ Marketplace</div>
+    <ul style="color:#9ab89a;margin:0;padding-left:18px;line-height:1.8;">
+      <li>Service Offerings Katalog</li>
+      <li>Plans mit Details (RAM, Storage)</li>
+      <li>Broker Info anzeigen</li>
+      <li>Quick Create → Service Instance erstellen</li>
+    </ul>
+  </div>
+
+  <!-- Buildpacks -->
+  <div style="background:#1e2626;border:1px solid #2a3838;border-radius:8px;padding:16px;border-left:3px solid #56b6c2;">
+    <div style="color:#56b6c2;font-weight:bold;font-size:15px;margin-bottom:8px;">⧉ Buildpacks</div>
+    <ul style="color:#9ab89a;margin:0;padding-left:18px;line-height:1.8;">
+      <li>Verfügbare Buildpacks (Java, Node, Go, ...)</li>
+      <li>Version & Status</li>
+      <li>ClusterBuilder Status (kpack)</li>
+      <li>Stack Images (Build/Run)</li>
+    </ul>
+  </div>
+
+  <!-- Status -->
+  <div style="background:#1e2626;border:1px solid #2a3838;border-radius:8px;padding:16px;border-left:3px solid #98c379;">
+    <div style="color:#98c379;font-weight:bold;font-size:15px;margin-bottom:8px;">♡ Korifi Status</div>
+    <ul style="color:#9ab89a;margin:0;padding-left:18px;line-height:1.8;">
+      <li>CF API v3 Info & Health</li>
+      <li>Gateway Status (Contour)</li>
+      <li>kpack ClusterBuilder Ready</li>
+      <li>Service Broker Verfügbarkeit</li>
+      <li>Auto-Refresh via HTMX (alle 30s)</li>
+    </ul>
+  </div>
+
+  <!-- User Management (Admin only) -->
+  <div style="background:#1e2626;border:1px solid #2a3838;border-radius:8px;padding:16px;border-left:3px solid #d19a66;grid-column:1/-1;">
+    <div style="color:#d19a66;font-weight:bold;font-size:15px;margin-bottom:8px;">⚙ User Management <span style="background:#d19a6633;color:#d19a66;font-size:10px;padding:2px 6px;border-radius:3px;margin-left:8px;">ADMIN ONLY</span></div>
+    <ul style="color:#9ab89a;margin:0;padding-left:18px;line-height:1.8;columns:2;">
+      <li>User Liste mit Rollen</li>
+      <li>User erstellen/löschen</li>
+      <li>Rolle zuweisen (Admin/Developer)</li>
+      <li>Org/Space Zuweisungen pro User</li>
+      <li>Passwort zurücksetzen</li>
+      <li>Login: Session-basiert (Spring Security)</li>
+    </ul>
+  </div>
+</div>

@@ -1,0 +1,138 @@
+<h2>UI Design — Chat Interfaces</h2>
+<p class="subtitle">Dedicated chat page + contextual pet chat widget</p>
+
+<!-- Dedicated Chat Page -->
+<div class="mockup">
+  <div class="mockup-header">Dedicated AI Chat Page (/ai/chat)</div>
+  <div class="mockup-body" style="padding: 0; font-family: system-ui; font-size: 0.85rem;">
+    <!-- Navbar hint -->
+    <div style="background: #1a2332; padding: 0.4rem 1rem; font-size: 0.7rem; color: #666; border-bottom: 1px solid #333;">
+      Petclinic &gt; AI Chat
+    </div>
+
+    <div style="display: flex; height: 420px;">
+      <!-- Sidebar: Topic Categories -->
+      <div style="width: 200px; background: #151e25; border-right: 1px solid #333; padding: 0.8rem; flex-shrink: 0;">
+        <div style="color: #888; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.6rem;">Topics</div>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <div style="padding: 6px 10px; border-radius: 6px; background: rgba(187,134,252,0.15); color: #bb86fc; font-size: 0.78rem; cursor: pointer;">&#x1f3e5; General Health</div>
+          <div style="padding: 6px 10px; border-radius: 6px; color: #aaa; font-size: 0.78rem; cursor: pointer;">&#x1f372; Nutrition & Diet</div>
+          <div style="padding: 6px 10px; border-radius: 6px; color: #aaa; font-size: 0.78rem; cursor: pointer;">&#x1f489; Vaccinations</div>
+          <div style="padding: 6px 10px; border-radius: 6px; color: #aaa; font-size: 0.78rem; cursor: pointer;">&#x1f6a8; Emergency Help</div>
+          <div style="padding: 6px 10px; border-radius: 6px; color: #aaa; font-size: 0.78rem; cursor: pointer;">&#x1fa7a; Post-Visit Care</div>
+        </div>
+
+        <div style="color: #888; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; margin: 1rem 0 0.6rem;">Quick Questions</div>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <div style="padding: 6px 10px; border-radius: 6px; background: #1e2626; color: #8bc34a; font-size: 0.72rem; cursor: pointer; border: 1px solid #2a3a2a;">"My dog ate chocolate"</div>
+          <div style="padding: 6px 10px; border-radius: 6px; background: #1e2626; color: #8bc34a; font-size: 0.72rem; cursor: pointer; border: 1px solid #2a3a2a;">"Cat won't eat"</div>
+          <div style="padding: 6px 10px; border-radius: 6px; background: #1e2626; color: #8bc34a; font-size: 0.72rem; cursor: pointer; border: 1px solid #2a3a2a;">"Vaccination schedule"</div>
+        </div>
+      </div>
+
+      <!-- Chat Area -->
+      <div style="flex: 1; display: flex; flex-direction: column;">
+        <!-- Messages -->
+        <div style="flex: 1; padding: 1rem; overflow-y: auto;">
+          <!-- AI Welcome -->
+          <div style="display: flex; gap: 0.6rem; margin-bottom: 1rem;">
+            <div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #bb86fc, #6db33f); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 0.9rem;">&#x1f43e;</div>
+            <div style="background: #1e2626; padding: 0.7rem 1rem; border-radius: 12px; border-top-left-radius: 4px; max-width: 80%;">
+              <div style="color: #ccc; font-size: 0.8rem;">Hello! I'm your PetClinic AI assistant. I can help with general pet health questions, nutrition advice, vaccination schedules, and emergency guidance. How can I help you today?</div>
+              <div style="color: #666; font-size: 0.6rem; margin-top: 4px;">&#x26a0; I'm not a substitute for professional veterinary care.</div>
+            </div>
+          </div>
+
+          <!-- User Message -->
+          <div style="display: flex; gap: 0.6rem; margin-bottom: 1rem; justify-content: flex-end;">
+            <div style="background: rgba(109,179,63,0.2); padding: 0.7rem 1rem; border-radius: 12px; border-top-right-radius: 4px; max-width: 80%;">
+              <div style="color: #ccc; font-size: 0.8rem;">My 8-year-old dog has been limping for two days. Should I be worried?</div>
+            </div>
+          </div>
+
+          <!-- AI Response with RAG indicator -->
+          <div style="display: flex; gap: 0.6rem; margin-bottom: 1rem;">
+            <div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #bb86fc, #6db33f); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 0.9rem;">&#x1f43e;</div>
+            <div style="background: #1e2626; padding: 0.7rem 1rem; border-radius: 12px; border-top-left-radius: 4px; max-width: 80%;">
+              <div style="color: #ccc; font-size: 0.8rem;">Limping in senior dogs can have several causes. Given that your dog is 8 years old, here are the most common possibilities:<br><br><strong>Common causes in senior dogs:</strong><br>&#x2022; Arthritis / joint degeneration<br>&#x2022; Muscle strain or sprain<br>&#x2022; Paw pad injury<br><br><strong>When to see a vet urgently:</strong><br>&#x2022; Swelling or heat around the joint<br>&#x2022; Refusal to put weight on the leg<br>&#x2022; Pain when touched...</div>
+              <div style="margin-top: 0.5rem; padding-top: 0.4rem; border-top: 1px solid #333;">
+                <span style="font-size: 0.6rem; color: #bb86fc;">&#x1f4da; Based on: Senior Dog Care, Joint Health in Large Breeds</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Input Area -->
+        <div style="padding: 0.8rem; border-top: 1px solid #333; display: flex; gap: 0.5rem; align-items: center;">
+          <input style="flex: 1; background: #111; border: 1px solid #444; border-radius: 8px; padding: 10px 14px; color: #fff; font-size: 0.8rem;" placeholder="Ask a question about pet health..." />
+          <button style="background: #6db33f; color: #fff; border: none; width: 36px; height: 36px; border-radius: 8px; cursor: pointer; font-size: 1rem;">&#x2191;</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Pet Detail Chat Widget -->
+<div class="mockup" style="margin-top: 2rem;">
+  <div class="mockup-header">Pet Detail Page (/pets/{id}) — AI Chat Widget</div>
+  <div class="mockup-body" style="padding: 1rem; font-family: system-ui; font-size: 0.85rem;">
+    <!-- Pet Header (simplified) -->
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; padding-bottom: 0.8rem; border-bottom: 1px solid #333;">
+      <div style="width: 48px; height: 48px; background: #2a3a2a; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">&#x1f415;</div>
+      <div>
+        <div style="color: #fff; font-weight: bold; font-size: 1rem;">Buddy</div>
+        <div style="color: #888; font-size: 0.75rem;">Dog &bull; Owner: James Carter &bull; Born: 2018-03-15</div>
+      </div>
+      <div style="margin-left: auto;">
+        <button style="background: linear-gradient(135deg, rgba(187,134,252,0.2), rgba(109,179,63,0.2)); color: #bb86fc; border: 1px solid rgba(187,134,252,0.4); padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 0.8rem;">&#x1f43e; Ask AI about Buddy</button>
+      </div>
+    </div>
+
+    <!-- Existing pet detail content (placeholder) -->
+    <div style="color: #555; font-size: 0.75rem; margin-bottom: 1rem; padding: 0.5rem; background: #111; border-radius: 4px;">
+      [ Existing pet detail: visits, owner info, etc. ]
+    </div>
+
+    <!-- AI Chat Panel (expanded) -->
+    <div style="border: 1px solid rgba(187,134,252,0.3); border-radius: 12px; background: rgba(187,134,252,0.03); overflow: hidden;">
+      <div style="padding: 0.6rem 1rem; background: rgba(187,134,252,0.1); display: flex; align-items: center; justify-content: space-between;">
+        <span style="color: #bb86fc; font-weight: bold; font-size: 0.8rem;">&#x1f43e; AI Assistant — Buddy</span>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <span style="font-size: 0.65rem; color: #888;">3 previous conversations</span>
+          <span style="color: #666; cursor: pointer; font-size: 0.9rem;">&#x2715;</span>
+        </div>
+      </div>
+
+      <!-- Context Banner -->
+      <div style="padding: 0.4rem 1rem; background: rgba(109,179,63,0.08); border-bottom: 1px solid #333; font-size: 0.7rem; color: #8bc34a;">
+        &#x1f4cb; Context: Buddy, Dog, 8 years old &bull; Last visit: 2026-03-15 (dental cleaning, Dr. Stevens) &bull; 12 total visits
+      </div>
+
+      <!-- Chat Messages (compact) -->
+      <div style="padding: 0.8rem; max-height: 200px; overflow-y: auto;">
+        <div style="display: flex; gap: 0.5rem; margin-bottom: 0.8rem;">
+          <div style="width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #bb86fc, #6db33f); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 0.6rem;">&#x1f43e;</div>
+          <div style="background: #1e2626; padding: 0.5rem 0.8rem; border-radius: 8px; font-size: 0.78rem; color: #ccc;">
+            Hi! I have Buddy's records. He's an 8-year-old dog who had a dental cleaning on March 15. What would you like to know?
+          </div>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <div style="padding: 0.5rem 0.8rem; border-top: 1px solid #333; display: flex; gap: 0.4rem;">
+        <input style="flex: 1; background: #111; border: 1px solid #444; border-radius: 6px; padding: 7px 10px; color: #fff; font-size: 0.78rem;" placeholder="Ask about Buddy..." />
+        <button style="background: #6db33f; color: #fff; border: none; width: 32px; height: 32px; border-radius: 6px; cursor: pointer;">&#x2191;</button>
+      </div>
+    </div>
+
+    <!-- Previous Conversations -->
+    <div style="margin-top: 0.8rem; padding: 0.6rem; background: #151e25; border-radius: 8px;">
+      <div style="color: #888; font-size: 0.7rem; margin-bottom: 0.4rem;">Previous AI conversations about Buddy:</div>
+      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+        <span style="background: #1e2626; padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; color: #aaa; cursor: pointer; border: 1px solid #333;">Mar 10 — Joint supplements</span>
+        <span style="background: #1e2626; padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; color: #aaa; cursor: pointer; border: 1px solid #333;">Feb 22 — Diet for senior dogs</span>
+        <span style="background: #1e2626; padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; color: #aaa; cursor: pointer; border: 1px solid #333;">Jan 15 — Dental care aftercare</span>
+      </div>
+    </div>
+  </div>
+</div>

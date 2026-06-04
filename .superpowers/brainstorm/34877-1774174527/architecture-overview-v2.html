@@ -1,0 +1,132 @@
+<h2>PetClinic AI Companion — Architektur v2</h2>
+<p class="subtitle">Systemkomponenten und Datenfluss (WebSocket Streaming)</p>
+
+<div class="mockup">
+  <div class="mockup-header">Architektur-Diagramm</div>
+  <div class="mockup-body" style="padding: 2rem; font-family: monospace; font-size: 0.85rem; line-height: 1.6;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; text-align: center;">
+
+      <!-- Row 1: User Layer -->
+      <div style="grid-column: 1 / 4; display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;">
+        <div style="border: 2px solid #6db33f; border-radius: 12px; padding: 1rem 1.5rem; background: rgba(109,179,63,0.1); min-width: 180px;">
+          <div style="font-weight: bold; color: #6db33f; margin-bottom: 0.3rem;">Browser UI</div>
+          <div style="font-size: 0.75rem; color: #aaa;">Thymeleaf + SockJS/STOMP Client</div>
+          <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
+            <span style="background: #2a3a2a; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem;">AI Settings</span>
+            <span style="background: #2a3a2a; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem;">Chat Page</span>
+            <span style="background: #2a3a2a; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem;">Pet Chat</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arrow -->
+      <div style="grid-column: 1 / 4; display: flex; align-items: center; justify-content: center; gap: 1rem;">
+        <div style="color: #666; font-size: 0.8rem;">HTTP (pages, REST)</div>
+        <div style="color: #6db33f; font-size: 1.2rem;">▼</div>
+        <div style="background: #2a3a2a; padding: 3px 10px; border-radius: 6px; border: 1px solid #6db33f;">
+          <span style="color: #6db33f; font-weight: bold; font-size: 0.8rem;">WebSocket</span>
+          <span style="color: #888; font-size: 0.7rem;"> STOMP + SockJS</span>
+        </div>
+        <div style="color: #6db33f; font-size: 1.2rem;">▼▲</div>
+        <div style="color: #666; font-size: 0.8rem;">bidirektional</div>
+      </div>
+
+      <!-- Row 2: Spring Boot -->
+      <div style="grid-column: 1 / 4;">
+        <div style="border: 2px solid #6db33f; border-radius: 12px; padding: 1.2rem; background: rgba(109,179,63,0.05);">
+          <div style="font-weight: bold; color: #6db33f; font-size: 1rem; margin-bottom: 0.8rem;">Spring Boot 4.0.4 + Spring AI 2.0.0-M3</div>
+          <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+            <div style="background: #1e2e1e; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #3a5a3a;">
+              <div style="font-weight: bold; color: #8bc34a; font-size: 0.8rem;">AiChatController</div>
+              <div style="font-size: 0.7rem; color: #aaa;">STOMP message handler</div>
+              <div style="font-size: 0.65rem; color: #666; margin-top: 2px;">/app/chat.send → /topic/chat.{id}</div>
+            </div>
+            <div style="background: #1e2e1e; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #3a5a3a;">
+              <div style="font-weight: bold; color: #8bc34a; font-size: 0.8rem;">AiSettingsController</div>
+              <div style="font-size: 0.7rem; color: #aaa;">REST + Thymeleaf</div>
+              <div style="font-size: 0.65rem; color: #666; margin-top: 2px;">GET/POST /ai/settings</div>
+            </div>
+            <div style="background: #1e2e1e; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #3a5a3a;">
+              <div style="font-weight: bold; color: #8bc34a; font-size: 0.8rem;">VetKnowledgeService</div>
+              <div style="font-size: 0.7rem; color: #aaa;">FTS Retrieval + Context</div>
+              <div style="font-size: 0.65rem; color: #666; margin-top: 2px;">tsvector/tsquery search</div>
+            </div>
+            <div style="background: #1e2e1e; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #3a5a3a;">
+              <div style="font-weight: bold; color: #8bc34a; font-size: 0.8rem;">OllamaChatService</div>
+              <div style="font-size: 0.7rem; color: #aaa;">Spring AI ChatClient</div>
+              <div style="font-size: 0.65rem; color: #666; margin-top: 2px;">Streaming → WebSocket push</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arrows -->
+      <div style="color: #666; font-size: 1.2rem;">▼ JDBC</div>
+      <div></div>
+      <div style="color: #666; font-size: 1.2rem;">▼ HTTP (REST)</div>
+
+      <!-- Row 3: Data Layer -->
+      <div style="border: 2px solid #336791; border-radius: 12px; padding: 1rem; background: rgba(51,103,145,0.1);">
+        <div style="font-weight: bold; color: #5b9bd5; margin-bottom: 0.5rem;">PostgreSQL 18</div>
+        <div style="font-size: 0.7rem; color: #aaa; text-align: left; padding-left: 0.5rem;">
+          <div>&#x2022; ai_settings (config)</div>
+          <div>&#x2022; vet_knowledge (FTS)</div>
+          <div>&#x2022; ai_chat_messages</div>
+          <div>&#x2022; + existing tables</div>
+        </div>
+      </div>
+
+      <div style="display: flex; align-items: center; justify-content: center; color: #666;">
+        <div style="border-top: 1px dashed #555; width: 100%;"></div>
+      </div>
+
+      <div style="border: 2px solid #e65100; border-radius: 12px; padding: 1rem; background: rgba(230,81,0,0.1);">
+        <div style="font-weight: bold; color: #ff9800; margin-bottom: 0.5rem;">Ollama (lokal)</div>
+        <div style="font-size: 0.7rem; color: #aaa; text-align: left; padding-left: 0.5rem;">
+          <div>&#x2022; Llama 3.1 8B (default)</div>
+          <div>&#x2022; Dynamische Modellliste</div>
+          <div>&#x2022; Variable IP (User-config)</div>
+          <div>&#x2022; Port 11434</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data Flow Note -->
+    <div style="margin-top: 1.5rem; padding: 1rem; background: #1a1a2e; border-radius: 8px; border: 1px solid #333;">
+      <div style="font-weight: bold; color: #bb86fc; margin-bottom: 0.4rem;">RAG + WebSocket Streaming Fluss:</div>
+      <div style="color: #ccc; font-size: 0.75rem;">
+        1. User sendet Nachricht via STOMP (/app/chat.send) &rarr;
+        2. FTS sucht relevante Wissens-Artikel in PostgreSQL &rarr;
+        3. Kontext + Pet-Daten + Frage als Prompt an Ollama &rarr;
+        4. Ollama streamt Tokens &rarr; Spring AI Flux &rarr; STOMP push an /topic/chat.{sessionId} &rarr;
+        5. Browser rendert Token-für-Token &rarr;
+        6. Bei Pet-Chats: vollständige Antwort in DB persistiert
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top: 1.5rem;">
+  <h3>WebSocket vs SSE</h3>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>WebSocket (STOMP + SockJS)</h4>
+      <ul>
+        <li>Bidirektional — User kann abbrechen/neue Frage senden</li>
+        <li>Stabil durch Traefik/Reverse-Proxies</li>
+        <li>SockJS Fallback (long-polling) wenn WS blockiert</li>
+        <li>Connection-State im Client sichtbar</li>
+        <li>Spring Boot erstklassiger Support</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>SSE (verworfen)</h4>
+      <ul>
+        <li>Unidirektional — kein Abbruch möglich</li>
+        <li>Proxy-Timeout-Probleme (Traefik, nginx)</li>
+        <li>Reconnect-Logik muss selbst gebaut werden</li>
+        <li>Browser-Limit: max 6 SSE-Verbindungen pro Domain</li>
+      </ul>
+    </div>
+  </div>
+</div>

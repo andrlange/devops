@@ -1,0 +1,115 @@
+<h2>PetClinic AI Companion — Architektur</h2>
+<p class="subtitle">Systemkomponenten und Datenfluss</p>
+
+<div class="mockup">
+  <div class="mockup-header">Architektur-Diagramm</div>
+  <div class="mockup-body" style="padding: 2rem; font-family: monospace; font-size: 0.85rem; line-height: 1.6;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; text-align: center;">
+
+      <!-- Row 1: User Layer -->
+      <div style="grid-column: 1 / 4; display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;">
+        <div style="border: 2px solid #6db33f; border-radius: 12px; padding: 1rem 1.5rem; background: rgba(109,179,63,0.1); min-width: 180px;">
+          <div style="font-weight: bold; color: #6db33f; margin-bottom: 0.3rem;">Browser UI</div>
+          <div style="font-size: 0.75rem; color: #aaa;">Thymeleaf + HTMX/SSE</div>
+          <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
+            <span style="background: #2a3a2a; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem;">AI Settings</span>
+            <span style="background: #2a3a2a; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem;">Chat Page</span>
+            <span style="background: #2a3a2a; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem;">Pet Chat</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arrow -->
+      <div style="grid-column: 1 / 4; color: #666; font-size: 1.2rem;">▼ HTTP / SSE (streaming)</div>
+
+      <!-- Row 2: Spring Boot -->
+      <div style="grid-column: 1 / 4;">
+        <div style="border: 2px solid #6db33f; border-radius: 12px; padding: 1.2rem; background: rgba(109,179,63,0.05);">
+          <div style="font-weight: bold; color: #6db33f; font-size: 1rem; margin-bottom: 0.8rem;">Spring Boot 4.0.4 + Spring AI 2.0.0-M3</div>
+          <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+            <div style="background: #1e2e1e; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #3a5a3a;">
+              <div style="font-weight: bold; color: #8bc34a; font-size: 0.8rem;">AiChatController</div>
+              <div style="font-size: 0.7rem; color: #aaa;">REST + SSE endpoints</div>
+            </div>
+            <div style="background: #1e2e1e; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #3a5a3a;">
+              <div style="font-weight: bold; color: #8bc34a; font-size: 0.8rem;">AiSettingsController</div>
+              <div style="font-size: 0.7rem; color: #aaa;">Config UI + persistence</div>
+            </div>
+            <div style="background: #1e2e1e; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #3a5a3a;">
+              <div style="font-weight: bold; color: #8bc34a; font-size: 0.8rem;">VetKnowledgeService</div>
+              <div style="font-size: 0.7rem; color: #aaa;">FTS Retrieval + Context</div>
+            </div>
+            <div style="background: #1e2e1e; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #3a5a3a;">
+              <div style="font-weight: bold; color: #8bc34a; font-size: 0.8rem;">OllamaChatService</div>
+              <div style="font-size: 0.7rem; color: #aaa;">Spring AI ChatClient</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arrows -->
+      <div style="color: #666; font-size: 1.2rem;">▼ JDBC</div>
+      <div></div>
+      <div style="color: #666; font-size: 1.2rem;">▼ HTTP (REST)</div>
+
+      <!-- Row 3: Data Layer -->
+      <div style="border: 2px solid #336791; border-radius: 12px; padding: 1rem; background: rgba(51,103,145,0.1);">
+        <div style="font-weight: bold; color: #5b9bd5; margin-bottom: 0.5rem;">PostgreSQL 18</div>
+        <div style="font-size: 0.7rem; color: #aaa; text-align: left; padding-left: 0.5rem;">
+          <div>&#x2022; ai_settings (config)</div>
+          <div>&#x2022; vet_knowledge (FTS)</div>
+          <div>&#x2022; ai_chat_messages</div>
+          <div>&#x2022; + existing tables</div>
+        </div>
+      </div>
+
+      <div style="display: flex; align-items: center; justify-content: center; color: #666;">
+        <div style="border-top: 1px dashed #555; width: 100%;"></div>
+      </div>
+
+      <div style="border: 2px solid #e65100; border-radius: 12px; padding: 1rem; background: rgba(230,81,0,0.1);">
+        <div style="font-weight: bold; color: #ff9800; margin-bottom: 0.5rem;">Ollama (lokal)</div>
+        <div style="font-size: 0.7rem; color: #aaa; text-align: left; padding-left: 0.5rem;">
+          <div>&#x2022; Llama 3.1 8B (default)</div>
+          <div>&#x2022; Dynamische Modellliste</div>
+          <div>&#x2022; Variable IP (User-config)</div>
+          <div>&#x2022; Port 11434</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data Flow Note -->
+    <div style="margin-top: 1.5rem; padding: 1rem; background: #1a1a2e; border-radius: 8px; border: 1px solid #333;">
+      <div style="font-weight: bold; color: #bb86fc; margin-bottom: 0.4rem;">RAG-Datenfluss:</div>
+      <div style="color: #ccc; font-size: 0.75rem;">
+        1. User stellt Frage (ggf. mit Pet-Kontext) &rarr;
+        2. FTS sucht relevante Wissens-Artikel in PostgreSQL &rarr;
+        3. Kontext + Pet-Daten + Frage werden als Prompt an Ollama gesendet &rarr;
+        4. Antwort wird per SSE gestreamt &rarr;
+        5. Chat-Nachricht wird bei Pet-Chats persistent gespeichert
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top: 1.5rem;">
+  <h3>Kern-Entscheidungen</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.8rem;">
+    <div style="background: #1e2626; padding: 1rem; border-radius: 8px; border-left: 3px solid #6db33f;">
+      <div style="font-weight: bold; color: #6db33f; font-size: 0.85rem;">RAG ohne Vektoren</div>
+      <div style="color: #aaa; font-size: 0.75rem; margin-top: 0.3rem;">PostgreSQL Full-Text-Search statt pgvector. Keine Extension, keine extra Services.</div>
+    </div>
+    <div style="background: #1e2626; padding: 1rem; border-radius: 8px; border-left: 3px solid #ff9800;">
+      <div style="font-weight: bold; color: #ff9800; font-size: 0.85rem;">Ollama extern</div>
+      <div style="color: #aaa; font-size: 0.75rem; margin-top: 0.3rem;">Läuft auf dem Mac, nicht im Cluster. URL wird in AI-Settings konfiguriert, in DB gespeichert.</div>
+    </div>
+    <div style="background: #1e2626; padding: 1rem; border-radius: 8px; border-left: 3px solid #5b9bd5;">
+      <div style="font-weight: bold; color: #5b9bd5; font-size: 0.85rem;">Chat pro Pet persistent</div>
+      <div style="color: #aaa; font-size: 0.75rem; margin-top: 0.3rem;">Pet-bezogene Gespräche in DB gespeichert. Allgemeine Chats nur session-basiert.</div>
+    </div>
+    <div style="background: #1e2626; padding: 1rem; border-radius: 8px; border-left: 3px solid #bb86fc;">
+      <div style="font-weight: bold; color: #bb86fc; font-size: 0.85rem;">Spring AI ChatClient</div>
+      <div style="color: #aaa; font-size: 0.75rem; margin-top: 0.3rem;">Spring AI 2.0.0-M3 für Ollama-Kommunikation. Streaming via SSE.</div>
+    </div>
+  </div>
+</div>

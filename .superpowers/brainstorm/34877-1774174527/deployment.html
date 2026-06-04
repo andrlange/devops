@@ -1,0 +1,92 @@
+<h2>Deployment — CF Context Handling</h2>
+<p class="subtitle">Safe org/space switching in deploy-cf.sh</p>
+
+<div class="mockup">
+  <div class="mockup-header">deploy-cf.sh — Context-Safe Deployment Flow</div>
+  <div class="mockup-body" style="padding: 1.5rem; font-family: monospace; font-size: 0.8rem; line-height: 1.7;">
+    <div style="color: #666;">#!/usr/bin/env bash</div>
+    <div style="color: #666; margin-bottom: 1rem;"># deploy-cf.sh — deploys petclinic to demo/spring, restores previous context</div>
+
+    <div style="margin-bottom: 0.8rem;">
+      <div style="color: #bb86fc;"># 1. Save current CF context</div>
+      <div style="color: #ccc;">PREV_ORG=$(cf target | grep "org:" | awk '{print $2}')</div>
+      <div style="color: #ccc;">PREV_SPACE=$(cf target | grep "space:" | awk '{print $2}')</div>
+    </div>
+
+    <div style="margin-bottom: 0.8rem;">
+      <div style="color: #bb86fc;"># 2. Switch to demo/spring</div>
+      <div style="color: #ccc;">cf target -o demo -s spring</div>
+    </div>
+
+    <div style="margin-bottom: 0.8rem;">
+      <div style="color: #bb86fc;"># 3. Create service if not exists</div>
+      <div style="color: #ccc;">cf create-service postgresql default petclinic-db</div>
+    </div>
+
+    <div style="margin-bottom: 0.8rem;">
+      <div style="color: #bb86fc;"># 4. Build & push</div>
+      <div style="color: #ccc;">./gradlew bootJar</div>
+      <div style="color: #ccc;">cf push</div>
+    </div>
+
+    <div style="margin-bottom: 0.8rem;">
+      <div style="color: #6db33f;"># 5. Restore previous context</div>
+      <div style="color: #ccc;">cf target -o "$PREV_ORG" -s "$PREV_SPACE"</div>
+      <div style="color: #888;">echo "Restored context: $PREV_ORG/$PREV_SPACE"</div>
+    </div>
+
+    <div style="margin-top: 1rem; padding: 0.8rem; background: #1a1a2e; border-radius: 6px; border: 1px solid #333;">
+      <div style="color: #ff9800; font-size: 0.75rem;">
+        <strong>Trap handler:</strong> Context is also restored on script failure (trap ... EXIT)<br>
+        So even if cf push fails, you're back on kappman/app.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Dependencies -->
+<div style="margin-top: 1.5rem;">
+  <h3>New Dependencies (build.gradle.kts)</h3>
+  <div style="background: #111; padding: 1rem; border-radius: 8px; border: 1px solid #333; font-family: monospace; font-size: 0.78rem; line-height: 1.6;">
+    <div style="color: #666;">// Spring AI</div>
+    <div style="color: #ccc;">val <span style="color: #5b9bd5;">springAiVersion</span> = <span style="color: #8bc34a;">"2.0.0-M3"</span></div>
+    <div style="color: #ccc;">implementation(<span style="color: #8bc34a;">"org.springframework.ai:spring-ai-ollama-spring-boot-starter:$springAiVersion"</span>)</div>
+    <div style="color: #ccc; margin-top: 0.5rem;">
+      <span style="color: #666;">// WebSocket</span><br>
+      implementation(<span style="color: #8bc34a;">"org.springframework.boot:spring-boot-starter-websocket"</span>)
+    </div>
+  </div>
+</div>
+
+<!-- Ollama Network Path -->
+<div style="margin-top: 1.5rem;">
+  <h3>Network: Ollama Connectivity</h3>
+  <div class="mockup">
+    <div class="mockup-header">Network Path: Korifi App &rarr; Ollama</div>
+    <div class="mockup-body" style="padding: 1.2rem; font-family: monospace; font-size: 0.8rem;">
+      <div style="display: flex; align-items: center; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+        <div style="border: 2px solid #6db33f; border-radius: 8px; padding: 0.6rem 1rem; text-align: center;">
+          <div style="color: #6db33f; font-size: 0.75rem;">Petclinic App</div>
+          <div style="color: #888; font-size: 0.65rem;">in Lima VM (K3s pod)</div>
+          <div style="color: #666; font-size: 0.6rem;">192.168.64.x</div>
+        </div>
+        <div style="color: #888;">&rarr; HTTP &rarr;</div>
+        <div style="border: 2px solid #ff9800; border-radius: 8px; padding: 0.6rem 1rem; text-align: center;">
+          <div style="color: #ff9800; font-size: 0.75rem;">vzNAT Gateway</div>
+          <div style="color: #888; font-size: 0.65rem;">192.168.64.1</div>
+        </div>
+        <div style="color: #888;">&rarr; NAT &rarr;</div>
+        <div style="border: 2px solid #e65100; border-radius: 8px; padding: 0.6rem 1rem; text-align: center;">
+          <div style="color: #e65100; font-size: 0.75rem;">Mac Host</div>
+          <div style="color: #888; font-size: 0.65rem;">Ollama :11434</div>
+          <div style="color: #666; font-size: 0.6rem;">WiFi IP varies</div>
+        </div>
+      </div>
+      <div style="margin-top: 1rem; padding: 0.6rem; background: #1a1a2e; border-radius: 6px; font-size: 0.7rem;">
+        <div style="color: #8bc34a;"><strong>Key insight:</strong> The app runs inside the Lima VM. To reach the Mac host, use the <strong>vzNAT gateway IP 192.168.64.1</strong> — this is always the same regardless of WiFi network.</div>
+        <div style="color: #ff9800; margin-top: 0.4rem;"><strong>Default Ollama URL:</strong> http://192.168.64.1:11434</div>
+        <div style="color: #888; margin-top: 0.3rem;">Ollama must be started with: OLLAMA_HOST=0.0.0.0 ollama serve</div>
+      </div>
+    </div>
+  </div>
+</div>
