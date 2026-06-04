@@ -1,9 +1,0 @@
-{"type":"server-started","port":58836,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:58836","screen_dir":"/Users/andreas/development/devops/.superpowers/brainstorm/34877-1774174527"}
-{"type":"screen-added","file":"/Users/andreas/development/devops/.superpowers/brainstorm/34877-1774174527/architecture-overview.html"}
-{"type":"screen-added","file":"/Users/andreas/development/devops/.superpowers/brainstorm/34877-1774174527/architecture-overview-v2.html"}
-{"type":"screen-added","file":"/Users/andreas/development/devops/.superpowers/brainstorm/34877-1774174527/ui-design-navbar.html"}
-{"type":"screen-added","file":"/Users/andreas/development/devops/.superpowers/brainstorm/34877-1774174527/ui-design-chat.html"}
-{"type":"screen-added","file":"/Users/andreas/development/devops/.superpowers/brainstorm/34877-1774174527/data-model.html"}
-{"type":"screen-added","file":"/Users/andreas/development/devops/.superpowers/brainstorm/34877-1774174527/deployment.html"}
-{"type":"screen-added","file":"/Users/andreas/development/devops/.superpowers/brainstorm/34877-1774174527/waiting.html"}
-{"type":"server-stopped","reason":"idle timeout"}

@@ -16,3 +16,8 @@ dist/
 # Compiled Go broker binaries (build artifacts)
 k8/services/cf-service-broker/src/cf-service-broker
 k8/services/cf-marketplace-broker/src/cf-marketplace-broker
+
+# Claude / local agent info — keep local only, never push to remote
+CLAUDE.md
+.claude/
+.superpowers/
