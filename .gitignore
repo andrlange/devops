@@ -21,3 +21,9 @@ k8/services/cf-marketplace-broker/src/cf-marketplace-broker
 CLAUDE.md
 .claude/
 .superpowers/
+
+# Standalone remote-server stacks — kept in their own repos, not in this one
+/artifactory/
+/otel/
+/router/
+/vault/

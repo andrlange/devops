@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+    <!--/* ============================================================
+         Fragment: navbar(activeMenu)
+         Usage: <nav th:replace="~{fragments/navbar :: navbar('home')}"></nav>
+         activeMenu values: home, owners, pets, vets, appointments
+         ============================================================ */-->
+    <nav th:fragment="navbar(activeMenu)" class="navbar navbar-expand-lg navbar-dark sticky-top">
+        <div class="container-fluid">
+
+            <!-- Brand -->
+            <a class="navbar-brand" th:href="@{/}">
+                <i class="bi bi-heart-pulse-fill"></i>
+                Petclinic
+            </a>
+
+            <!-- Mobile toggle -->
+            <button class="navbar-toggler border-0" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#navbarMain"
+                    aria-controls="navbarMain" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+
+            <!-- Nav links -->
+            <div class="collapse navbar-collapse" id="navbarMain">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li class="nav-item">
+                        <a class="nav-link" th:classappend="${activeMenu == 'home'} ? 'active'"
+                           th:href="@{/}">
+                            <i class="bi bi-house-door me-1"></i>Home
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" th:classappend="${activeMenu == 'owners'} ? 'active'"
+                           th:href="@{/owners}">
+                            <i class="bi bi-people me-1"></i>Owners
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" th:classappend="${activeMenu == 'pets'} ? 'active'"
+                           th:href="@{/pets}">
+                            <i class="bi bi-heart me-1"></i>Pets
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" th:classappend="${activeMenu == 'vets'} ? 'active'"
+                           th:href="@{/vets}">
+                            <i class="bi bi-clipboard2-pulse me-1"></i>Vets
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" th:classappend="${activeMenu == 'appointments'} ? 'active'"
+                           th:href="@{/appointments}">
+                            <i class="bi bi-calendar-check me-1"></i>Appointments
+                        </a>
+                    </li>
+
+                    <!-- AI Chat (visible only when AI enabled) -->
+                    <li class="nav-item" th:if="${aiEnabled}">
+                        <a class="nav-link" th:classappend="${activeMenu == 'ai-chat'} ? 'active'"
+                           th:href="@{/ai/chat}">
+                            <i class="bi bi-chat-dots me-1"></i>AI Chat
+                        </a>
+                    </li>
+                </ul>
+
+                <!-- Right side: AI controls + DB badge + Instance + Status -->
+                <div class="d-flex align-items-center gap-2">
+
+                    <!-- AI Settings (when enabled) -->
+                    <a class="nav-link py-0 px-2" th:if="${aiEnabled}"
+                       th:classappend="${activeMenu == 'ai-settings'} ? 'active'"
+                       th:href="@{/ai/settings}" style="font-size: 0.85rem; color: #aaa;">
+                        <i class="bi bi-gear me-1"></i>AI Settings
+                    </a>
+
+                    <!-- AI Toggle (always visible) -->
+                    <a class="ai-toggle" href="#" th:attr="data-enabled=${aiEnabled}"
+                       onclick="toggleAi(event)" style="text-decoration: none;">
+                        <span class="ai-status-badge" th:classappend="${aiEnabled} ? 'ai-on' : 'ai-off'"
+                              style="padding: 3px 10px; font-size: 0.75rem; cursor: pointer;">
+                            <i class="bi bi-stars me-1"></i>AI
+                            <span th:text="${aiEnabled} ? 'ON' : 'OFF'">OFF</span>
+                        </span>
+                    </a>
+
+                    <!-- AI Model badge (when enabled) -->
+                    <span class="ai-model-badge" th:if="${aiEnabled}">
+                        <i class="bi bi-robot me-1"></i>
+                        <span th:text="${aiModel}">llama3.1:8b</span>
+                    </span>
+
+                    <!-- Runtime environment badge -->
+                    <span class="instance-badge" th:if="${runtimeEnv != null}">
+                        <i class="bi me-1" th:classappend="${runtimeEnv == 'Cloud Foundry'} ? 'bi-cloud' : (${runtimeEnv == 'Docker'} ? 'bi-box-seam' : (${runtimeEnv == 'Kubernetes'} ? 'bi-diagram-3' : 'bi-pc-display'))"></i>
+                        <span th:text="${runtimeEnv}">Local</span>
+                    </span>
+
+                    <!-- Database type badge -->
+                    <span class="db-badge" th:if="${databaseType != null}">
+                        <span class="status-dot"
+                              th:classappend="${databaseType == 'PostgreSQL'} ? '' : 'status-orange'"
+                              style="width: 8px; height: 8px; margin-right: 2px;"></span>
+                        <span th:text="${databaseType}">PostgreSQL</span>
+                    </span>
+
+                    <!-- Instance badge -->
+                    <span class="instance-badge" th:if="${instanceId != null}"
+                          th:text="${instanceId}">instance-0</span>
+
+                    <!-- Status indicator -->
+                    <span class="d-flex align-items-center ms-1">
+                        <span class="status-dot"></span>
+                        <span class="text-light small d-none d-lg-inline">Running</span>
+                    </span>
+
+                    <!-- Tech stack dropdown -->
+                    <div class="dropdown d-none d-lg-block">
+                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle py-1 px-2"
+                                type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                                style="font-size: 0.75rem;">
+                            <i class="bi bi-stack"></i>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" style="min-width: 200px;">
+                            <li><h6 class="dropdown-header" style="color: var(--spring-green);">Tech Stack</h6></li>
+                            <li><span class="dropdown-item-text small"><i class="bi bi-box me-2"></i>Spring Boot 4.0.4</span></li>
+                            <li><span class="dropdown-item-text small"><i class="bi bi-filetype-java me-2"></i>Kotlin 2.3.10 / JDK 25</span></li>
+                            <li><span class="dropdown-item-text small"><i class="bi bi-layout-text-window me-2"></i>Thymeleaf</span></li>
+                            <li><span class="dropdown-item-text small"><i class="bi bi-bootstrap me-2"></i>Bootstrap 5.3</span></li>
+                            <li th:if="${aiEnabled}"><span class="dropdown-item-text small"><i class="bi bi-stars me-2"></i>Spring AI 2.0.0-M3</span></li>
+                            <li class="dropdown-divider"></li>
+                            <li>
+                                <span class="dropdown-item-text small" th:if="${databaseType != null}">
+                                    <i class="bi bi-database me-2"></i><span th:text="${databaseType}">Database</span>
+                                </span>
+                            </li>
+                        </ul>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+        <script>
+            function toggleAi(event) {
+                event.preventDefault();
+                fetch('/ai/toggle', { method: 'POST' })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.redirect) { window.location.href = data.redirect; }
+                        else { window.location.reload(); }
+                    });
+            }
+        </script>
+    </nav>
+
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${monthName + ' ' + year + ' | Petclinic'}">Calendar | Petclinic</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link th:href="@{/css/petclinic.css}" rel="stylesheet">
+</head>
+<body>
+    <div th:replace="~{fragments/navbar :: navbar('appointments')}"></div>
+
+    <div class="container py-4">
+
+        <!-- Page header -->
+        <div class="hero mb-4">
+            <h1><i class="bi bi-calendar-check me-2"></i>Appointments</h1>
+            <p class="mb-0">Monthly calendar view</p>
+        </div>
+
+        <!-- Month navigation -->
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <a class="btn btn-outline-secondary calendar-nav-prev"
+               th:href="@{/appointments(year=${prevYear}, month=${prevMonth})}">
+                <i class="bi bi-chevron-left"></i>
+            </a>
+            <h3 class="mb-0" th:text="${monthName + ' ' + year}">March 2026</h3>
+            <a class="btn btn-outline-secondary calendar-nav-next"
+               th:href="@{/appointments(year=${nextYear}, month=${nextMonth})}">
+                <i class="bi bi-chevron-right"></i>
+            </a>
+        </div>
+
+        <!-- Year quick-nav -->
+        <div class="d-flex justify-content-center gap-2 mb-4 flex-wrap">
+            <th:block th:each="navYear : ${#numbers.sequence(2024, 2034)}">
+                <a class="btn btn-sm"
+                   th:classappend="${navYear == year} ? 'btn-primary' : 'btn-outline-secondary'"
+                   th:href="@{/appointments(year=${navYear}, month=${month})}"
+                   th:text="${navYear}">2026</a>
+            </th:block>
+        </div>
+
+        <!-- Calendar grid -->
+        <div class="card">
+            <div class="card-body p-3">
+                <div class="calendar-grid">
+                    <!-- Header row -->
+                    <div class="calendar-header">Mon</div>
+                    <div class="calendar-header">Tue</div>
+                    <div class="calendar-header">Wed</div>
+                    <div class="calendar-header">Thu</div>
+                    <div class="calendar-header">Fri</div>
+                    <div class="calendar-header">Sat</div>
+                    <div class="calendar-header">Sun</div>
+
+                    <!-- Day cells -->
+                    <div th:each="day : ${calendarDays}"
+                         class="calendar-cell"
+                         th:classappend="${(day.isToday ? ' today' : '') + (!day.isCurrentMonth ? ' other-month' : '')}">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <span class="calendar-day-number" th:text="${day.dayOfMonth}">1</span>
+                            <a th:if="${day.visitCount > 0}"
+                               th:href="@{/appointments/day(date=${day.date})}"
+                               class="badge badge-status-scheduled text-decoration-none"
+                               style="font-size: 0.7rem;"
+                               th:text="${day.visitCount}">3</a>
+                        </div>
+                        <div th:if="${day.visitCount > 0}" class="mt-1">
+                            <span th:each="dot : ${#numbers.sequence(1, (day.visitCount > 5 ? 5 : day.visitCount))}"
+                                  class="calendar-dot"></span>
+                            <span th:if="${day.visitCount > 5}" class="text-muted" style="font-size: 0.65rem;">...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="mt-4">
+            <a th:href="@{/appointments/new}" class="btn btn-primary">
+                <i class="bi bi-plus-circle me-1"></i>New Appointment
+            </a>
+        </div>
+
+    </div>
+
+    <div th:replace="~{fragments/layout :: footer}"></div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script th:src="@{/js/calendar.js}"></script>
+</body>
+</html>

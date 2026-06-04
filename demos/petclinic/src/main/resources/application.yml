@@ -1,0 +1,32 @@
+spring:
+  application:
+    name: petclinic
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.model.ollama.autoconfigure.OllamaApiAutoConfiguration
+      - org.springframework.ai.model.ollama.autoconfigure.OllamaChatAutoConfiguration
+      - org.springframework.ai.model.ollama.autoconfigure.OllamaEmbeddingAutoConfiguration
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/petclinic}
+    username: ${SPRING_DATASOURCE_USERNAME:petclinic}
+    password: ${SPRING_DATASOURCE_PASSWORD:petclinic}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+server:
+  port: ${PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,env
+
+petclinic:
+  instance-id: ${CF_INSTANCE_INDEX:${HOSTNAME:local}}

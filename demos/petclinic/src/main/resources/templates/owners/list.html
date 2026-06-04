@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Owners | Petclinic</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link th:href="@{/css/petclinic.css}" rel="stylesheet">
+</head>
+<body>
+    <div th:replace="~{fragments/navbar :: navbar('owners')}"></div>
+
+    <main class="container py-4">
+
+        <!-- Page Header -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div class="hero">
+                <h1>Owners</h1>
+                <p class="mb-0">Manage pet owners and their information.</p>
+            </div>
+            <a th:href="@{/owners/new}" class="btn btn-primary">
+                <i class="bi bi-plus-lg me-1"></i>Add Owner
+            </a>
+        </div>
+
+        <!-- Search Bar -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="input-group">
+                    <span class="input-group-text" style="background-color: var(--spring-card); border-color: var(--spring-border); color: var(--spring-muted);">
+                        <i class="bi bi-search"></i>
+                    </span>
+                    <input type="text" class="form-control" id="owner-search"
+                           data-live-filter="filterable-list"
+                           placeholder="Filter by name, city, email...">
+                </div>
+            </div>
+        </div>
+
+        <!-- Results -->
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-people me-2"></i>Owners
+                <span class="badge bg-spring ms-2" id="filterable-list-count"
+                      th:text="${#lists.size(owners)}">0</span>
+            </div>
+            <div class="card-body p-0">
+
+                <!-- No results -->
+                <div th:if="${#lists.isEmpty(owners)}" class="text-center py-4" style="color: var(--spring-muted);">
+                    <i class="bi bi-people" style="font-size: 2rem;"></i>
+                    <p class="mt-2 mb-0">No owners found.</p>
+                </div>
+
+                <!-- Owners table -->
+                <div th:unless="${#lists.isEmpty(owners)}" class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>City</th>
+                                <th>Telephone</th>
+                                <th>Email</th>
+                                <th>Pets</th>
+                            </tr>
+                        </thead>
+                        <tbody id="filterable-list">
+                            <tr th:each="owner : ${owners}"
+                                th:attr="data-filter-text=${owner.firstName + ' ' + owner.lastName + ' ' + owner.city + ' ' + owner.email + ' ' + owner.telephone}">
+                                <td>
+                                    <a th:href="@{/owners/{id}(id=${owner.id})}"
+                                       th:text="${owner.firstName + ' ' + owner.lastName}">John Doe</a>
+                                </td>
+                                <td th:text="${owner.city}">Springfield</td>
+                                <td th:text="${owner.telephone}">555-1234</td>
+                                <td th:text="${owner.email}">john@example.com</td>
+                                <td>
+                                    <span class="badge bg-spring" th:text="${#lists.size(owner.pets)}">0</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+            </div>
+        </div>
+
+    </main>
+
+    <div th:replace="~{fragments/layout :: footer}"></div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script th:src="@{/js/live-filter.js}"></script>
+</body>
+</html>

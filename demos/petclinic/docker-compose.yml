@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: petclinic-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-petclinic}
+      POSTGRES_USER: ${POSTGRES_USER:-petclinic}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-petclinic}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-petclinic}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pg-data:
+    name: petclinic-pg-data

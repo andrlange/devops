@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${owner.firstName + ' ' + owner.lastName + ' | Petclinic'}">Owner | Petclinic</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link th:href="@{/css/petclinic.css}" rel="stylesheet">
+</head>
+<body>
+    <div th:replace="~{fragments/navbar :: navbar('owners')}"></div>
+
+    <main class="container py-4">
+
+        <!-- Page Header with Actions -->
+        <div class="d-flex justify-content-between align-items-start mb-4">
+            <div class="hero">
+                <h1 th:text="${owner.firstName + ' ' + owner.lastName}">John Doe</h1>
+                <p class="mb-0">Owner details and associated pets.</p>
+            </div>
+            <div class="d-flex gap-2">
+                <a th:href="@{/owners/{id}/edit(id=${owner.id})}" class="btn btn-outline-primary">
+                    <i class="bi bi-pencil me-1"></i>Edit
+                </a>
+                <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteModal">
+                    <i class="bi bi-trash me-1"></i>Delete
+                </button>
+            </div>
+        </div>
+
+        <!-- Owner Info Card -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-person me-2"></i>Owner Information
+            </div>
+            <div class="card-body p-0">
+                <table class="table mb-0">
+                    <tbody>
+                        <tr>
+                            <td class="label">Name</td>
+                            <td class="value" th:text="${owner.firstName + ' ' + owner.lastName}">John Doe</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Address</td>
+                            <td class="value" th:text="${owner.address}">123 Main St</td>
+                        </tr>
+                        <tr>
+                            <td class="label">City</td>
+                            <td class="value" th:text="${owner.city}">Springfield</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Telephone</td>
+                            <td class="value" th:text="${owner.telephone}">555-1234</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Email</td>
+                            <td class="value" th:text="${owner.email}">john@example.com</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Pets Section -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-heart me-2"></i>Pets
+                <span class="badge bg-spring ms-2" th:text="${#lists.size(pets)}">0</span>
+            </div>
+            <div class="card-body">
+
+                <div th:if="${#lists.isEmpty(pets)}" class="text-center py-3" style="color: var(--spring-muted);">
+                    <i class="bi bi-heart" style="font-size: 2rem;"></i>
+                    <p class="mt-2 mb-0">No pets registered for this owner.</p>
+                </div>
+
+                <div class="row g-3" th:unless="${#lists.isEmpty(pets)}">
+                    <div class="col-md-6 col-lg-4" th:each="pet : ${pets}">
+                        <a th:href="@{/pets/{id}(id=${pet.id})}" class="text-decoration-none">
+                            <div class="card h-100" style="transition: border-color 0.15s;">
+                                <div class="card-body d-flex align-items-center gap-3">
+                                    <!-- Pet type image -->
+                                    <img th:src="@{'/images/types/' + ${pet.type.name.toLowerCase().replace(' ', '-')} + '.svg'}"
+                                         th:alt="${pet.type.name}" class="pet-thumbnail">
+                                    <div>
+                                        <h6 class="mb-1" style="color: var(--spring-green);" th:text="${pet.name}">Buddy</h6>
+                                        <small style="color: var(--spring-muted);">
+                                            <span th:text="${pet.type.name}">Dog</span>
+                                            <span class="mx-1">&middot;</span>
+                                            Born <span th:text="${#temporals.format(pet.birthDate, 'MMM dd, yyyy')}">Jan 01, 2020</span>
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        </a>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Appointments Section -->
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-calendar-check me-2"></i>Appointments
+                <span class="badge bg-spring ms-2" th:text="${#lists.size(visits)}">0</span>
+            </div>
+            <div class="card-body p-0">
+
+                <div th:if="${#lists.isEmpty(visits)}" class="text-center py-4" style="color: var(--spring-muted);">
+                    <i class="bi bi-calendar-x" style="font-size: 2rem;"></i>
+                    <p class="mt-2 mb-0">No appointments found.</p>
+                </div>
+
+                <div th:unless="${#lists.isEmpty(visits)}" class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Time</th>
+                                <th>Pet</th>
+                                <th>Vet</th>
+                                <th>Description</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr th:each="visit : ${visits}">
+                                <td th:text="${#temporals.format(visit.date, 'MMM dd, yyyy')}">Jan 01, 2026</td>
+                                <td th:text="${#temporals.format(visit.time, 'HH:mm')}">09:00</td>
+                                <td>
+                                    <a th:href="@{/pets/{id}(id=${visit.pet.id})}" th:text="${visit.pet.name}">Buddy</a>
+                                </td>
+                                <td th:text="${visit.vet.firstName + ' ' + visit.vet.lastName}">Dr. Smith</td>
+                                <td th:text="${visit.description}">Checkup</td>
+                                <td>
+                                    <span class="badge"
+                                          th:classappend="${visit.status.name() == 'SCHEDULED'} ? 'badge-status-scheduled' : (${visit.status.name() == 'COMPLETED'} ? 'badge-status-completed' : 'badge-status-cancelled')"
+                                          th:text="${visit.status.name()}">SCHEDULED</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content" style="background-color: var(--spring-card); border-color: var(--spring-border);">
+                <div class="modal-header" style="border-color: var(--spring-border);">
+                    <h5 class="modal-title" id="deleteModalLabel">Confirm Delete</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    Are you sure you want to delete <strong th:text="${owner.firstName + ' ' + owner.lastName}">this owner</strong>?
+                    This will also remove all associated pets and their appointments.
+                </div>
+                <div class="modal-footer" style="border-color: var(--spring-border);">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <form th:action="@{/owners/{id}/delete(id=${owner.id})}" method="post" class="d-inline">
+                        <button type="submit" class="btn btn-outline-danger">
+                            <i class="bi bi-trash me-1"></i>Delete
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div th:replace="~{fragments/layout :: footer}"></div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

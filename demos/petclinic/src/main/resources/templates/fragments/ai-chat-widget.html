@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- Fragment: chatWidget(pet, visits) -->
+<div th:fragment="chatWidget(pet, visits)" class="ai-pet-widget">
+
+    <!-- Toggle Button (shown when panel is collapsed) -->
+    <div id="ai-widget-toggle" class="ai-pet-widget-header" style="cursor: pointer;" onclick="aiWidgetOpen()">
+        <span>
+            <i class="bi bi-robot me-2" style="color: #bb86fc;"></i>
+            Ask AI about <strong th:text="${pet.name}">Pet</strong>
+        </span>
+        <i class="bi bi-chevron-down" style="color: #bb86fc;"></i>
+    </div>
+
+    <!-- Chat Panel (hidden by default) -->
+    <div id="ai-widget-panel" style="display: none;">
+
+        <!-- Panel Header -->
+        <div class="ai-pet-widget-header">
+            <span>
+                <i class="bi bi-robot me-2" style="color: #bb86fc;"></i>
+                AI Assistant — <strong th:text="${pet.name}">Pet</strong>
+            </span>
+            <button class="btn btn-sm" style="color: #aaa; background: none; border: none; padding: 0;" onclick="aiWidgetClose()">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+
+        <!-- Context Banner -->
+        <div class="ai-pet-context">
+            <span th:text="${pet.type.name}">Dog</span>
+            <span class="mx-2">·</span>
+            Born: <span th:text="${pet.birthDate}">2020-01-15</span>
+            <span th:if="${visits != null and !visits.isEmpty()}">
+                <span class="mx-2">·</span>
+                <span th:text="${visits.size()}">0</span> visit<span th:if="${visits.size() != 1}">s</span>
+            </span>
+            <span th:if="${visits == null or visits.isEmpty()}">
+                <span class="mx-2">·</span>
+                0 visits
+            </span>
+        </div>
+
+        <!-- Previous Sessions -->
+        <div class="ai-pet-sessions" id="ai-pet-sessions-bar">
+            <span style="font-size: 0.7rem; color: #666; align-self: center;">Past sessions:</span>
+            <span style="font-size: 0.7rem; color: #555; align-self: center;" id="ai-sessions-loading">Loading...</span>
+        </div>
+
+        <!-- Message Area -->
+        <div class="ai-chat-container" id="ai-pet-messages" style="height: 300px; border-radius: 0; border-left: none; border-right: none; border-top: 1px solid var(--spring-border); border-bottom: none;">
+            <div class="ai-message ai-message-ai">
+                <div class="ai-avatar"><i class="bi bi-robot"></i></div>
+                <div class="ai-message-bubble">
+                    Hi! I can answer questions about <strong th:text="${pet.name}">this pet</strong>'s health, visits, and care.
+                    What would you like to know?
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Bar -->
+        <div class="ai-input-bar" style="padding: 0.5rem 1rem; border-top: 1px solid var(--spring-border); background: var(--spring-card);">
+            <input type="text" id="ai-pet-input" class="form-control"
+                   th:placeholder="'Ask about ' + ${pet.name} + '...'"
+                   onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); aiWidgetSend(); }">
+            <button class="btn btn-primary btn-sm" onclick="aiWidgetSend()">
+                <i class="bi bi-send-fill"></i>
+            </button>
+        </div>
+
+        <!-- Status Bar -->
+        <div style="padding: 0.25rem 1rem 0.4rem; background: var(--spring-card); font-size: 0.7rem; color: #555; display: flex; align-items: center; gap: 0.4rem;">
+            <span class="ai-conn-status" id="ai-pet-conn-dot"></span>
+            <span id="ai-pet-conn-label">Connecting...</span>
+        </div>
+
+    </div>
+
+    <!-- Hidden pet metadata for JS -->
+    <span id="ai-pet-id" th:data-pet-id="${pet.id}" style="display:none;"></span>
+    <span id="ai-pet-name" th:data-pet-name="${pet.name}" style="display:none;"></span>
+
+    <script th:inline="javascript">
+    /*<![CDATA[*/
+    (function() {
+        var petId   = /*[[${pet.id}]]*/ null;
+        var petName = /*[[${pet.name}]]*/ '';
+
+        var sessionId = null;
+
+        function aiWidgetOpen() {
+            document.getElementById('ai-widget-toggle').style.display = 'none';
+            document.getElementById('ai-widget-panel').style.display  = 'block';
+            if (!sessionId) {
+                initSession();
+            }
+        }
+        window.aiWidgetOpen = aiWidgetOpen;
+
+        function aiWidgetClose() {
+            document.getElementById('ai-widget-panel').style.display  = 'none';
+            document.getElementById('ai-widget-toggle').style.display = 'flex';
+        }
+        window.aiWidgetClose = aiWidgetClose;
+
+        function initSession() {
+            var stored = null;
+            try { stored = sessionStorage.getItem('ai-pet-session-' + petId); } catch(e) {}
+            sessionId = stored || ('pet-' + petId + '-' + Date.now());
+            try { sessionStorage.setItem('ai-pet-session-' + petId, sessionId); } catch(e) {}
+
+            if (typeof AiChat !== 'undefined') {
+                var connDot   = document.getElementById('ai-pet-conn-dot');
+                var connLabel = document.getElementById('ai-pet-conn-label');
+
+                AiChat.connect(sessionId, function() {
+                    if (connDot) { connDot.className = 'ai-conn-status connected'; }
+                    if (connLabel) { connLabel.textContent = 'Connected'; }
+                }, function(err) {
+                    if (connDot) { connDot.className = 'ai-conn-status disconnected'; }
+                    if (connLabel) { connLabel.textContent = 'Disconnected'; }
+                });
+                loadSessions();
+            }
+        }
+
+        function aiWidgetSend() {
+            var input = document.getElementById('ai-pet-input');
+            var text  = (input.value || '').trim();
+            if (!text) return;
+            input.value = '';
+            if (typeof AiChat !== 'undefined') {
+                var msgContainer = document.getElementById('ai-pet-messages');
+                AiChat.sendMessage(text, petId, msgContainer);
+            }
+        }
+        window.aiWidgetSend = aiWidgetSend;
+
+        function loadSessions() {
+            if (typeof AiChat === 'undefined' || typeof AiChat.loadSessions === 'undefined') return;
+            AiChat.loadSessions(petId, function(sessions) {
+                var bar     = document.getElementById('ai-pet-sessions-bar');
+                var loading = document.getElementById('ai-sessions-loading');
+                if (loading) loading.remove();
+
+                if (!sessions || sessions.length === 0) {
+                    var empty = document.createElement('span');
+                    empty.style.cssText = 'font-size:0.7rem;color:#555;align-self:center;';
+                    empty.textContent   = 'No previous sessions';
+                    bar.appendChild(empty);
+                    return;
+                }
+
+                sessions.forEach(function(s) {
+                    var tag = document.createElement('span');
+                    tag.className   = 'ai-pet-session-tag';
+                    tag.textContent = s.date ? s.date : s.id;
+                    tag.title       = s.topic || s.id;
+                    tag.onclick     = function() {
+                        if (typeof AiChat !== 'undefined') {
+                            var msgContainer = document.getElementById('ai-pet-messages');
+                            AiChat.loadHistory(petId, msgContainer);
+                        }
+                    };
+                    bar.appendChild(tag);
+                });
+            });
+        }
+    })();
+    /*]]>*/
+    </script>
+</div>
+
+</body>
+</html>
