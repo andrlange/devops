@@ -24,7 +24,7 @@ KUBECONFIG_HOST="${HOME}/.kube/config-${LIMA_VM_NAME}"
 KUBE_CONTEXT="k3s-${LIMA_VM_NAME}"
 
 # Domain fallbacks (support both old BASE_DOMAIN and new PLATFORM_DOMAIN/APPS_DOMAIN)
-PLATFORM_DOMAIN="${PLATFORM_DOMAIN:-${BASE_DOMAIN:-development.cfapps.cool}}"
+PLATFORM_DOMAIN="${PLATFORM_DOMAIN:-${BASE_DOMAIN:-sys.cfapps.cool}}"
 APPS_DOMAIN="${APPS_DOMAIN:-app.cfapps.cool}"
 
 # ---------------------------------------------------------------------------

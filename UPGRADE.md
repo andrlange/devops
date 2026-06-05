@@ -983,11 +983,14 @@ committed so a fresh `helm install` uses the same versions. Pre-flight: Velero `
   exist in the 40.2.0 schema; `--dry-run` passed; upgrade clean, single v3.7.1 pod. Routing+TLS verified
   via the LB IP — argocd **200**, grafana **302**, artifacts **200**, served cert `*.sys.cfapps.cool`.
 
-**Discovery (pre-existing, flag for install-path):** the **live platform's domain is `sys.cfapps.cool`**,
-not the `development.cfapps.cool` placeholder in `config.env` / some hardcoded values (e.g. the Traefik
-dashboard matchRule). Live IngressRoutes are all `*.sys.cfapps.cool`. A fresh install from the repo would
-use whatever `config.env`/iteration-zero sets — the domain is install-time configurable, so the hardcoded
-`development.cfapps.cool` references should ideally be templated. Not a Wave 3 regression; needs a decision.
+**Discovery → RESOLVED (2026-06-05):** the live platform domain is `sys.cfapps.cool`. Investigation showed
+`development.cfapps.cool` in the manifests is a **sed PLACEHOLDER** — `install.sh:261` does
+`sed s/development.cfapps.cool/${PLATFORM_DOMAIN}/g` at install time, so the live `sys` came from the
+configured `PLATFORM_DOMAIN`. **Fix (per user: domain should be `sys.cfapps.cool`):** changed the *default*
+in `config.env` (`PLATFORM_DOMAIN=sys.cfapps.cool`) + all `${PLATFORM_DOMAIN:-…}` fallbacks in
+`install.sh`/`stack.sh` from development→sys. **Left the manifest placeholders untouched** (they're the
+sed source). Verified: `stack.sh status` now shows `*.sys.cfapps.cool` endpoints, all UP (argocd 200,
+grafana 302, artifacts 200). Fresh installs now default to sys and substitute placeholders → sys.
 
 _Checklist:_
 - [x] cert-manager → 1.20.2 (certs Ready)

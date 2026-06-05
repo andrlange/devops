@@ -235,7 +235,7 @@ get_metallb_apps_ip() {
 substitute_domains() {
   log_info "Substituting domains across manifests..."
 
-  local platform_domain="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+  local platform_domain="${PLATFORM_DOMAIN:-sys.cfapps.cool}"
   local apps_domain="${APPS_DOMAIN:-app.cfapps.cool}"
   local acme_email="${ACME_EMAIL:-admin@cfapps.cool}"
 
@@ -391,7 +391,7 @@ cmd_zero() {
 
   local cfg_base_domain
   while true; do
-    cfg_base_domain=$(ask "Platform domain (*.development.<domain>)" "${PLATFORM_DOMAIN:-development.cfapps.cool}")
+    cfg_base_domain=$(ask "Platform domain (e.g. sys.<domain>)" "${PLATFORM_DOMAIN:-sys.cfapps.cool}")
     if validate_domain "$cfg_base_domain"; then break; fi
   done
 
@@ -1612,7 +1612,7 @@ install_phase_3() {
   if ! component_is_installed "PHASE3_MIRROR" "$STATE_FILE"; then
     if command -v crane &>/dev/null; then
       log_step "Mirroring monitoring images to local registry..."
-      local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+      local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-sys.cfapps.cool}"
       local AK_ADMIN_PASS
       AK_ADMIN_PASS=$(kubectl exec -n openbao openbao-0 -- bao kv get -field=admin_password secret/artifact-keeper/app 2>/dev/null) || true
       if [[ -n "${AK_ADMIN_PASS:-}" ]]; then
@@ -1786,7 +1786,7 @@ install_phase_4() {
 
   write_credentials
   mark_phase_complete 4 "$STATE_FILE"
-  log_success "Phase 4 complete — artifact-keeper available at https://artifacts.${PLATFORM_DOMAIN:-development.cfapps.cool}"
+  log_success "Phase 4 complete — artifact-keeper available at https://artifacts.${PLATFORM_DOMAIN:-sys.cfapps.cool}"
   echo ""
 }
 
@@ -1802,7 +1802,7 @@ install_phase_5() {
 
   ensure_openbao_login
 
-  local GITLAB_DOMAIN="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+  local GITLAB_DOMAIN="${PLATFORM_DOMAIN:-sys.cfapps.cool}"
 
   # --- Store GitLab root password ---
   if ! component_is_installed "phase5_secrets" "$STATE_FILE"; then
@@ -2096,7 +2096,7 @@ GCEOF
   # --- Setup local registry for Korifi ---
   if ! component_is_installed "phase6_local_registry" "$STATE_FILE"; then
     log_step "Setting up local registry for Korifi builds..."
-    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-sys.cfapps.cool}"
     local LOCAL_AK="https://artifacts.${LOCAL_REGISTRY}"
 
     # Ensure OpenBao is logged in
@@ -2145,7 +2145,7 @@ GCEOF
   # --- Create CF namespaces and registry credentials ---
   if ! component_is_installed "phase6_namespaces" "$STATE_FILE"; then
     log_step "Creating CF namespaces..."
-    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-sys.cfapps.cool}"
     ensure_namespace "cf"
     ensure_namespace "korifi"
     ensure_namespace "korifi-gateway"
@@ -2196,7 +2196,7 @@ json.dump(d, sys.stdout)
   # --- Mirror buildpack images to local registry ---
   if ! component_is_installed "phase6_mirror_buildpacks" "$STATE_FILE"; then
     log_step "Mirroring buildpack images to local registry..."
-    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-sys.cfapps.cool}"
     local LOCAL_PREFIX="artifacts.${LOCAL_REGISTRY}/korifi"
 
     if command -v crane &>/dev/null; then
@@ -2228,7 +2228,7 @@ json.dump(d, sys.stdout)
   # --- Install Korifi ---
   if ! component_is_installed "phase6_korifi" "$STATE_FILE"; then
     log_step "Installing Korifi v0.18.0..."
-    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-sys.cfapps.cool}"
     local LOCAL_PREFIX="artifacts.${LOCAL_REGISTRY}/korifi"
     helm install korifi \
       https://github.com/cloudfoundry/korifi/releases/download/v0.18.0/korifi-0.18.0.tgz \
@@ -2308,7 +2308,7 @@ KGWEOF
   # --- Configure Buildpacks (local images) ---
   if ! component_is_installed "phase6_buildpacks" "$STATE_FILE"; then
     log_step "Configuring buildpacks (Java, Go, Node.js, PHP, Ruby, httpd, procfile)..."
-    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-development.cfapps.cool}"
+    local LOCAL_REGISTRY="${PLATFORM_DOMAIN:-sys.cfapps.cool}"
     local LOCAL_PREFIX="artifacts.${LOCAL_REGISTRY}/korifi"
 
     # Set ClusterStore to local buildpack images
