@@ -74,7 +74,7 @@ The platform is **two physically separate planes**:
 
 | Component | Image / App | Helm chart | Pinned in | Dependents |
 |---|---|---|---|---|
-| **ArgoCD** | v3.3.4 (redis 8.2.3) | 9.4.15 | `k8/platform/argocd/{Chart,values}.yaml` | GitOps app-of-apps; can reconcile/revert other upgrades. |
+| **ArgoCD** | v3.3.4 (redis 8.2.3) | 9.4.15 | `k8/platform/argocd/{Chart,values}.yaml` | Installed as a component, but **not** managing the stack (0 Application CRs — stack is Helm-managed). Upgrade like any other Helm release. |
 | **External Secrets (ESO)** | v0.16.1 | 0.16.1 | `k8/platform/external-secrets/{Chart,values}.yaml` | Backed by OpenBao; feeds all secrets incl. registry pull secret. CRDs auto-installed. |
 | **Portainer** | 2.39.1 (app 2.39.0) | 239.0.2 | `k8/platform/portainer/{Chart,values}.yaml` | Management UI. |
 | **Garage (S3)** | v2.2.0 | (raw manifest, StatefulSet) | `k8/platform/garage/deployment.yaml:24` | **S3 backend for Velero, Loki, Mimir, Tempo, artifact-keeper.** High blast radius. |
@@ -547,21 +547,30 @@ limactl snapshot create k3s-server --tag wave<N> 2>/dev/null \
 cd artifactory && ./scripts/backup.sh && cd -        # + otel/ vault/ as touched
 ```
 
-**GitOps sync flow** (turn auto-sync off for the campaign so each change is deliberate):
+**Upgrade flow — Helm, NOT ArgoCD** (confirmed Wave 0: the stack has **0 ArgoCD Application CRs**; it
+is deployed via **direct Helm releases**, local wrapper charts `<name>-0.1.0` that vendor the upstream
+chart under `charts/`). ArgoCD is installed as a *component* but does not manage the stack — so there is
+no auto-sync to disable. A wave step is:
 ```bash
-argocd app set <app> --sync-policy none              # once, per app (or the root app-of-apps)
-# per change:
+# 1. bump the wrapper chart: Chart.yaml (dependency version + appVersion) + values.yaml (image tag)
+# 2. refresh the vendored dependency, then upgrade the single release:
+helm dependency update k8/<layer>/<component>            # re-fetches charts/<dep>-<ver>.tgz
+helm upgrade <release> k8/<layer>/<component> -n <ns>    # e.g. helm upgrade traefik k8/infrastructure/traefik -n traefik
 git commit -am "wave<N>: <component> <old> -> <new>" && git push
-argocd app sync <app> && argocd app wait <app> --health --operation --timeout 600
+# raw-manifest components (Garage, Mimir, Technitium) = edit the YAML tag + kubectl apply -f
 ```
+Rollback for any wave = `git revert` the wave commit + `helm upgrade <release> …` back to the prior chart
+(or `helm rollback <release> <prev-revision> -n <ns>`).
 
 **Health baseline / verification probe** (green = safe to proceed):
 ```bash
-argocd app list -o wide | grep -vE 'Synced.*Healthy' || echo "all Synced+Healthy"
+helm ls -A | grep -iv deployed && echo "⚠ a release is not 'deployed'" || echo "all helm releases deployed"
 kubectl get pods -A | grep -vE 'Running|Completed' || echo "no bad pods"
 ./k8/stack.sh status
-for h in argocd portainer grafana artifacts vault s3 dns backup gitlab; do
-  curl -sk -o /dev/null -w "%{http_code}  $h\n" "https://$h.development.cfapps.cool"; done
+# OpenBao + secret backbone
+kubectl exec -n openbao openbao-0 -- bao status | grep -E 'Sealed|Initialized'
+kubectl get clustersecretstore openbao -o jsonpath='{.status.conditions[-1].reason}{"\n"}'   # expect Valid
+kubectl get externalsecrets -A -o json | jq -r '[.items[].status.conditions[-1].reason]|group_by(.)|map("\(length) \(.[0])")|.[]'
 ```
 
 ### 3.1 Wave map
@@ -586,8 +595,9 @@ for h in argocd portainer grafana artifacts vault s3 dns backup gitlab; do
 
 ### 3.2 Routine waves — checklists
 
-Each routine wave = bump `Chart.yaml`+`values.yaml` (or raw manifest tag) → `argocd app sync` → probe →
-next. Rollback for all routine waves = `git revert` the wave commit + `argocd app sync`.
+Each routine wave = bump `Chart.yaml`+`values.yaml` (or raw manifest tag) → `helm upgrade <release> k8/<path> -n <ns>`
+(or `kubectl apply` for raw manifests) → probe → next. Rollback for all routine waves = `git revert` the
+wave commit + `helm upgrade` back (or `helm rollback <release> <prev-rev> -n <ns>`).
 
 - **Wave 0:** capture live versions of the 4 floats and pin them *as-is* first —
   `kubectl get nodes -o wide` (K3s), `helm ls -A` (Reflector/CNPG charts), `kubectl -n rabbitmq-system get deploy -o jsonpath` (op image). Commit those exact versions, *then* later waves bump them.
@@ -624,7 +634,7 @@ diff <(grep -v '^\s*#' k8/services/openbao/values.yaml) /tmp/openbao-0.28.3.defa
 crane manifest artifactory.cfapps.cool/docker-local/openbao/openbao:2.5.4-arm64 >/dev/null && echo IMG_OK
 # edit k8/services/openbao/Chart.yaml (version 0.28.3, appVersion 2.5.4) + values.yaml (image tag 2.5.4-arm64)
 git commit -am "wave4: OpenBao 2.5.1->2.5.4, chart 0.8.0->0.28.3" && git push
-argocd app sync openbao && argocd app wait openbao --health --timeout 600
+helm dependency update k8/services/openbao && helm upgrade openbao k8/services/openbao -n openbao && kubectl -n openbao rollout status statefulset/openbao
 # pod restarts SEALED — unseal (standalone file backend):
 for k in <unseal-key-1> <unseal-key-2> <unseal-key-3>; do kubectl exec -n openbao openbao-0 -- bao operator unseal "$k"; done
 kubectl exec -n openbao openbao-0 -- bao status        # Sealed: false
@@ -641,7 +651,7 @@ grep -rn "external-secrets.io/v1beta1" k8/            # every hit must move to .
 helm show crds external-secrets/external-secrets --version 2.5.0 | kubectl apply --server-side -f -
 # 3) bump k8/platform/external-secrets/Chart.yaml (2.5.0) + values.yaml (image v2.5.0-arm64); diff vs new defaults
 git commit -am "wave4: ESO 0.16.1->2.5.0, CRDs v1beta1->v1" && git push
-argocd app sync external-secrets && argocd app wait external-secrets --health --timeout 600
+helm upgrade external-secrets k8/platform/external-secrets -n external-secrets && kubectl -n external-secrets rollout status deploy/external-secrets
 ```
 
 **Verification**
@@ -656,7 +666,7 @@ kubectl annotate externalsecret -A --all force-sync="$(date +%s)" --overwrite
 **Rollback**
 ```bash
 # ESO (do this first): revert the commit, restore old CRDs + CRs
-git revert --no-edit <wave4-eso-commit> && git push && argocd app sync external-secrets
+git revert --no-edit <wave4-eso-commit> && git push && helm upgrade external-secrets k8/platform/external-secrets -n external-secrets
 kubectl apply -f /tmp/eso-crs.bak.yaml     # NOTE: v1->v1beta1 is lossy; backup is the source of truth
 # OpenBao: restore PVC then redeploy old chart, then unseal
 velero restore create --from-backup wave4-secrets --include-namespaces openbao
@@ -702,7 +712,7 @@ crane manifest artifactory.cfapps.cool/docker-local/opensearchproject/opensearch
 #   resources: request ~3Gi (heap*~1.5) — CHECK Lima 48Gi headroom
 # add it to the artifact-keeper kustomization/ArgoCD app
 git add k8/services/artifact-keeper/opensearch && git commit -m "wave7: add OpenSearch 2.19.5" && git push
-argocd app sync artifact-keeper && kubectl -n <ns> rollout status statefulset/opensearch
+kubectl apply -k k8/services/artifact-keeper/ && kubectl -n <ns> rollout status statefulset/opensearch
 kubectl -n <ns> exec <opensearch-pod> -- curl -s localhost:9200/_cluster/health | grep -o '"status":"[a-z]*"'  # green/yellow
 ```
 
@@ -714,14 +724,14 @@ kubectl -n <ns> exec <opensearch-pod> -- curl -s localhost:9200/_cluster/health 
 #   remove the Meilisearch init container + probe
 # deployment-web.yaml: image -> .../artifact-keeper-web:1.2.0-patched-arm64
 git commit -am "wave7: artifact-keeper rc.8-patched -> 1.2.0-patched (OpenSearch)" && git push
-argocd app sync artifact-keeper && argocd app wait artifact-keeper --health --timeout 600
+kubectl apply -k k8/services/artifact-keeper/ && kubectl -n <ns> rollout status deploy/artifact-keeper
 # reindex into OpenSearch per the 1.2.0 admin API / job
 ```
 
 **Part 4 — decommission Meilisearch**
 ```bash
 git rm -r k8/services/artifact-keeper/meilisearch && git commit -m "wave7: drop Meilisearch" && git push
-argocd app sync artifact-keeper
+kubectl apply -k k8/services/artifact-keeper/
 kubectl -n <ns> delete pvc <meilisearch-pvc>          # only AFTER search is verified
 ```
 
@@ -736,7 +746,7 @@ docker login artifacts.development.cfapps.cool -u <svc-account> -p <api-token>
 **Rollback**
 ```bash
 git revert --no-edit <wave7-cutover-commit> <wave7-drop-meili-commit> && git push   # restores rc.8-patched + Meilisearch manifests
-argocd app sync artifact-keeper
+kubectl apply -k k8/services/artifact-keeper/
 velero restore create --from-backup wave7-ak --include-namespaces <ak-namespace>     # if PVC/DB damaged
 # or DB-only: gunzip -c /tmp/ak-pg.*.sql.gz | kubectl exec -i -n <ns> <pg-pod> -- psql -U <user> <db>
 ```
@@ -865,9 +875,14 @@ Local charts are thin wrappers (`<name>-0.1.0`) with a dependency on the upstrea
 - CloudNativePG → `--version 0.27.1` (`install.sh`)
 - RabbitMQ Operator → pinned download `v2.20.0` (`install.sh`)
 
-**Side findings:**
-- 🔧 Velero **Garage BackupStorageLocation `Unavailable`** → cluster-wide Velero backups broken. **Fix before Wave 5** (it's a wave gate).
-- 🔧 Stack is **Helm-managed, not ArgoCD** (0 Application CRs). Ch.3 "`argocd app sync`" → use `helm upgrade <release> k8/<path>` (wrapper charts vendor the upstream dep). **Correct Ch.3 before Wave 2.**
+**Side findings → housekeeping (both RESOLVED 2026-06-05, post-Wave-0):**
+- ✅ Velero **Garage BSL** was `Unavailable` — root cause: `k8/velero/values.yaml` bucket `velero-backups`
+  but the actual Garage bucket alias is `velero` (matching loki/mimir/tempo/artifacts; velero key has RWO).
+  Fixed values.yaml → `velero`, `helm upgrade velero`, BSL now **Available**, test backup `Completed`
+  (0 errors). (The earlier "velero-server cannot watch pods" log was boot-time transient — gone.)
+- ✅ **Ch.3 corrected** to the real model: stack is **Helm-managed, not ArgoCD** — all `argocd app sync`
+  steps replaced with `helm upgrade <release> k8/<path>` (or `kubectl apply -k` for artifact-keeper);
+  health probe now uses `helm ls` + OpenBao/ESO checks.
 - Lima snapshot is `unimplemented` on the vz backend → VM-snapshot gate not available; rely on per-component backups + reproducible install.
 
 _Checklist:_

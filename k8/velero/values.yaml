@@ -23,7 +23,7 @@ velero:
     backupStorageLocation:
       - name: garage
         provider: aws
-        bucket: velero-backups
+        bucket: velero          # was 'velero-backups' (Wave 0 fix): actual Garage bucket alias is 'velero', matching loki/mimir/tempo/artifacts
         config:
           region: garage
           s3ForcePathStyle: "true"
