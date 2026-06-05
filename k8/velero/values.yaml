@@ -1,13 +1,13 @@
 velero:
   image:
     repository: artifactory.cfapps.cool/docker-local/velero/velero
-    tag: v1.18.0-arm64
+    tag: v1.18.1-arm64
     imagePullSecrets:
       - artifact-keeper-pull
 
   initContainers:
     - name: velero-plugin-for-aws
-      image: artifactory.cfapps.cool/docker-local/velero/velero-plugin-for-aws:v1.14.0-arm64
+      image: artifactory.cfapps.cool/docker-local/velero/velero-plugin-for-aws:v1.14.1-arm64
       imagePullPolicy: IfNotPresent
       volumeMounts:
         - mountPath: /target

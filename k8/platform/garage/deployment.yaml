@@ -21,7 +21,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: garage
-          image: artifactory.cfapps.cool/docker-local/dxflrs/garage:v2.2.0-arm64
+          image: artifactory.cfapps.cool/docker-local/dxflrs/garage:v2.3.0-arm64
           imagePullPolicy: IfNotPresent
           ports:
             - name: s3-api

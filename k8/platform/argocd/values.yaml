@@ -3,7 +3,7 @@ argo-cd:
     domain: argocd.development.cfapps.cool
     image:
       repository: artifactory.cfapps.cool/docker-local/argoproj/argocd
-      tag: v3.3.4-arm64
+      tag: v3.4.3-arm64
     imagePullSecrets:
       - name: artifact-keeper-pull
 

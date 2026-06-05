@@ -1,7 +1,7 @@
 portainer:
   image:
     repository: artifactory.cfapps.cool/docker-local/portainer/portainer-ce
-    tag: "2.39.1-arm64"
+    tag: "2.39.3-arm64"
     pullPolicy: IfNotPresent
 
   imagePullSecrets:

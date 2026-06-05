@@ -2,10 +2,10 @@ apiVersion: v2
 name: portainer
 description: Portainer CE - Kubernetes management UI
 version: 0.1.0
-appVersion: "2.39.0"
+appVersion: "2.39.3"
 type: application
 
 dependencies:
   - name: portainer
-    version: "239.0.2"
+    version: "239.3.0"
     repository: https://portainer.github.io/k8s

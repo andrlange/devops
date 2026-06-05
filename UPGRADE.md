@@ -833,7 +833,8 @@ after next week's Spring release.*
 | 1 — Image supply chain | ✅ complete (28 target images mirrored) | 2026-06-05 | 67bb17d |
 | 2 — Host foundation (Lima + K3s) | ✅ complete (K3s 1.34.5→1.36.1) | 2026-06-05 | 39a4a52 |
 | 3 — Networking & TLS edge | ✅ complete (cert-manager, MetalLB, Traefik) | 2026-06-05 | eb95e5e |
-| 4 — Secrets backbone (OpenBao → ESO) 🔴 | ✅ complete (OpenBao 2.5.4, ESO 2.5.0) | 2026-06-05 | _this commit_ |
+| 4 — Secrets backbone (OpenBao → ESO) 🔴 | ✅ complete (OpenBao 2.5.4, ESO 2.5.0) | 2026-06-05 | 6d3e453 |
+| 5 — Storage & platform | ✅ complete (Garage, ArgoCD, Portainer, Technitium, Velero) | 2026-06-05 | _this commit_ |
 
 ### Wave 0 — Stabilize & checkpoint
 
@@ -1024,4 +1025,36 @@ _Checklist:_
 - [x] OpenBao → 2.5.4 (orphan-recreate STS, data preserved, unsealed)
 - [x] ESO repo manifests v1beta1 → v1 (install-path)
 - [x] ESO → 2.5.0; ClusterSecretStore Valid, 48/48 SecretSynced
+- [x] Vendored chart deps committed; log committed + pushed
+
+### Wave 5 — Storage & platform
+
+**Goal:** Garage → ArgoCD → Portainer → Technitium → Velero, on both live + install path. Pre-flight:
+Velero `wave5-pre` (resources) + `wave5-technitium` (PV fs-backup, major upgrade).
+
+**Reusable learning — domain on `helm upgrade`:** components whose **chart values carry a domain**
+(argocd `global.domain`, portainer `domain`) must be upgraded with `--set <domain>=…sys.cfapps.cool`,
+else the repo's `development.cfapps.cool` placeholder reverts the live domain. Raw-manifest components
+with a domain *env* (technitium) → use `kubectl set image` (image-only) to avoid reverting it.
+
+- **Garage v2.2.0 → v2.3.0** (raw STS): `kubectl apply` hit the immutable-STS-field error → used
+  `kubectl set image` (image-only). BSL went Unavailable for ~30s during the restart, **recovered to
+  Available** on re-validation. S3 buckets intact.
+- **ArgoCD v3.3.4 → v3.4.3** (chart 9.4.15 → 9.5.18): `--set argo-cd.global.domain=argocd.sys.cfapps.cool`;
+  redis kept at 8.2.3-alpine-arm64 (still in registry, dry-run confirmed). All pods on v3.4.3, argocd.sys 200.
+- **Portainer 2.39.0 → 2.39.3** (chart 239.0.2 → 239.3.0): `--set domain=sys.cfapps.cool`. portainer.sys 200.
+- **Technitium 14.3.0 → 15.2.0** (🔴 major, raw Deployment): `kubectl set image` (preserves the live
+  `dns.sys…` env). Config PV auto-migrated to v15; DNS still resolves internal zones (argocd.sys → LB IP).
+- **Velero v1.18.0 → v1.18.1** (file:// vendored chart 12.0.0 → **12.0.2** replaced, Chart.lock regen) +
+  **AWS plugin v1.14.0 → v1.14.1**. node-agent on v1.18.1. **Test backup Completed (0 errors)** end-to-end.
+- **Velero UI** already at target (chart 0.14.0 / image 0.10.1) — no change.
+
+**Verified:** all platform endpoints UP on sys (argocd/portainer/artifacts/backup/dns 200, grafana/gitlab
+302, vault 307, s3 403=up), 0 bad pods, 48/48 ExternalSecrets synced.
+
+_Checklist:_
+- [x] Garage v2.3.0 (S3/BSL verified)
+- [x] ArgoCD v3.4.3, Portainer 2.39.3 (domains pinned to sys)
+- [x] Technitium 15.2.0 (major; PV migrated, DNS verified)
+- [x] Velero v1.18.1 + plugin v1.14.1 (vendored chart 12.0.2; test backup passed)
 - [x] Vendored chart deps committed; log committed + pushed

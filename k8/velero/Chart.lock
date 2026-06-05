@@ -1,6 +1,6 @@
 dependencies:
 - name: velero
   repository: file://charts/velero
-  version: 12.0.0
-digest: sha256:4622e2035e14fe149151b48a328f53f84b2dfd84b4eaf1479f356627f44f8e73
-generated: "2026-03-29T11:27:31.488604+02:00"
+  version: 12.0.2
+digest: sha256:fd7039b3c1589ff47e498bfc09c0a45ea4dc942efd6e63d6cb508b004ba80a72
+generated: "2026-06-05T18:37:24.695229+02:00"

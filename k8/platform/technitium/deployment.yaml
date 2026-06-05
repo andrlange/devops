@@ -18,7 +18,7 @@ spec:
         - name: artifact-keeper-pull
       containers:
         - name: dns-server
-          image: artifactory.cfapps.cool/docker-local/technitium/dns-server:14.3.0-arm64
+          image: artifactory.cfapps.cool/docker-local/technitium/dns-server:15.2.0-arm64
           env:
             - name: DNS_SERVER_DOMAIN
               value: dns.development.cfapps.cool
