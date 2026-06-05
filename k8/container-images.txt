@@ -75,8 +75,12 @@ grafana/alloy:v1.14.1
 # PostgreSQL (für artifact-keeper, ggf. GitLab)
 postgres:17.9
 
-# Meilisearch (Volltext-Suche für artifact-keeper)
-getmeili/meilisearch:v1.39.0
+# OpenSearch (Volltext-Suche für artifact-keeper, ersetzt Meilisearch ab v1.2.0)
+opensearchproject/opensearch:2.19.5
+
+# artifact-keeper Backend + Web (offizielle Upstream-Images ab v1.2.0)
+ghcr.io/artifact-keeper/artifact-keeper-backend:1.2.0
+ghcr.io/artifact-keeper/artifact-keeper-web:1.2.0
 
 # --- Phase 5: GitLab CE ---------------------------------------------------
 

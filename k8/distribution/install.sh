@@ -1712,7 +1712,7 @@ install_phase_3() {
 # =============================================================================
 # Phase 4 — Services
 # =============================================================================
-# artifact-keeper (Backend + Web + Trivy), PostgreSQL, Meilisearch
+# artifact-keeper (Backend + Web + Trivy), PostgreSQL, OpenSearch
 # =============================================================================
 install_phase_4() {
   phase_timer_start 4
@@ -1767,8 +1767,8 @@ install_phase_4() {
     log_step "Storing artifact-keeper secrets in OpenBao..."
     kubectl exec -n openbao openbao-0 -- bao kv put secret/artifact-keeper/postgres \
       username="artifact_keeper" password="$(openssl rand -hex 16)" database="artifact_keeper" &>/dev/null
-    kubectl exec -n openbao openbao-0 -- bao kv put secret/artifact-keeper/meilisearch \
-      master_key="$(openssl rand -hex 16)" &>/dev/null
+    # Search backend is OpenSearch (v1.2.0+), run with the security plugin disabled for
+    # internal cluster-only use — no credentials required, so no OpenBao secret needed.
     local ak_admin_pass=$(openssl rand -hex 16)
     kubectl exec -n openbao openbao-0 -- bao kv put secret/artifact-keeper/app \
       jwt_secret="$(openssl rand -base64 32)" \
@@ -1784,7 +1784,7 @@ install_phase_4() {
 
   # --- Deploy artifact-keeper stack ---
   if ! component_is_installed "phase4_artifact_keeper" "$STATE_FILE"; then
-    log_step "Deploying artifact-keeper (PostgreSQL, Meilisearch, Backend, Web, Trivy)..."
+    log_step "Deploying artifact-keeper (PostgreSQL, OpenSearch, Backend, Web, Trivy)..."
     kubectl apply -k "${K8_DIR}/services/artifact-keeper/" 2>&1 | grep -v "Warning"
     log_info "Waiting for pods..."
     wait_for_pods "artifact-keeper" 180
@@ -3000,7 +3000,7 @@ cmd_status() {
     "Foundation (Lima, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager)"
     "Platform (ArgoCD, Portainer, Garage, Technitium, Velero)"
     "Monitoring (Loki, Mimir, Tempo, Alloy, KSM, node-exporter, Grafana)"
-    "Services (artifact-keeper, PostgreSQL, Meilisearch)"
+    "Services (artifact-keeper, PostgreSQL, OpenSearch)"
     "GitLab CE"
     "Cloud Foundry / Korifi [OPTIONAL]"
     "CF Service Brokers [OPTIONAL]"
@@ -3154,7 +3154,7 @@ continue_from_phase() {
 
   if [[ "$completed_phase" -lt 4 ]] && phase_is_complete 3 "$STATE_FILE"; then
     echo ""
-    log_info "Phase 4 deploys: artifact-keeper (Backend + Web UI), PostgreSQL, Meilisearch, Trivy"
+    log_info "Phase 4 deploys: artifact-keeper (Backend + Web UI), PostgreSQL, OpenSearch, Trivy"
     if ask_yes_no "Continue with Phase 4 (Services)?" "y"; then
       install_phase_4
     else return 0; fi
@@ -3258,7 +3258,7 @@ ${BOLD}Commands:${NC}
                     1: Foundation (Lima, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager)
                     2: Platform (ArgoCD, Portainer, Garage, Technitium, Velero)
                     3: Monitoring (Loki, Mimir, Tempo, Alloy, KSM, node-exporter, Grafana)
-                    4: Services (artifact-keeper, PostgreSQL, Meilisearch)
+                    4: Services (artifact-keeper, PostgreSQL, OpenSearch)
                     5: GitLab CE
                     6: Cloud Foundry / Korifi [OPTIONAL] (requires phases 1-3)
                     7: CF Service Brokers [OPTIONAL] (requires phase 6)

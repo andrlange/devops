@@ -1113,3 +1113,58 @@ _Checklist:_
 - [x] Stored helm release manifests patched v1beta1→v1; ESO SSA conflicts resolved
 - [x] Logging pipeline fixed (varlog mount, path regex, local.file_match, service DNS) — logs flow to Loki
 - [x] Vendored chart deps committed; log committed + pushed
+
+### Wave 7 — artifact-keeper (in-cluster) → 1.2.0 + OpenSearch 🔴
+
+**Goal:** rc.8-patched → 1.2.0, Meilisearch → OpenSearch, on both live + install path. Pre-flight:
+Velero `wave7-ak` (Completed) + logical `pg_dump` (177K, 92 tables) to `/tmp/ak-pg-wave7.sql.gz`.
+
+**★ Strategy change (confirmed with user) — official upstream images, NO custom build.** Recon showed all
+5 custom patches are now upstream in 1.2.0, so the documented "build `-patched` images" pipeline (clone /
+git-apply / `cargo sqlx prepare` / multi-arch buildx / Docker Hub) is unnecessary:
+- be/001, be/002 (revoked-token filter): upstream — `WHERE … AND revoked_at IS NULL` (profile.rs, users.rs).
+- be/003 (API-token-as-docker-password): upstream — oci_v2.rs tries `validate_api_token(&password)`.
+- web/001 (permissions repo dropdown): upstream — `repositoriesApi` + `targetOptions` + groups.
+- web/002 (Select z-index): only-cosmetic, base `select.tsx` now ships `z-50`+`position` — dropped.
+We mirror the official `ghcr.io/artifact-keeper/{backend,web}:1.2.0` (arm64) →
+`docker-local/ghcr.io/artifact-keeper/…:1.2.0-arm64`, plus `opensearchproject/opensearch:2.19.5-arm64`.
+
+**OpenSearch** (`k8/services/artifact-keeper/opensearch/` — StatefulSet+Service, VCT 5Gi): single-node,
+`DISABLE_SECURITY_PLUGIN=true` (internal-only, plain http, no creds → no OpenBao secret), 1g heap
+(`-Xms1g -Xmx1g`), `discovery.type=single-node` (skips bootstrap checks incl. vm.max_map_count). Green.
+
+**v1.2.0 env-contract changes (caught by reading config.rs — would have silently broken storage):**
+- `STORAGE_BACKEND` now defaults to **filesystem** → must set `=s3` explicitly (added to configmap).
+- S3 cred env renamed `S3_ACCESS_KEY`/`S3_SECRET_KEY` → **`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`**
+  (same underlying secret keys). Search env `MEILISEARCH_*` → `OPENSEARCH_URL`. Reindex is automatic
+  (backend `is_index_empty()` → background `full_reindex` on startup) + manual `POST /api/admin/reindex`.
+
+**🔴 Migration path rc.8 (v71) → 1.2.0 (v113): upstream bug + the v1.1.9-hop fix.** v1.2.0's
+`migration_repair::repair_release_1_1_9_divergence` does `SELECT (checksum WHERE version=73),(…74),(…75)`
+decoded as a **non-Option** `(Vec<u8>,Vec<u8>,Vec<u8>)`; that scalar-subquery row always exists but
+returns NULL columns when 73/74/75 are absent — which they are coming from rc.8 (v71) → backend
+CrashLoop `decoding column 0: unexpected null`. The repair assumes a **v1.1.9** install. Fix without
+patching the image: temporary `kubectl set image` hop to **1.1.9-arm64** (mirrored) which applies
+migrations 72–75 to v75 (search "not configured", migrations run regardless), then `set image` back to
+1.2.0 — its repair now finds the 1.1.9 checksums, rewrites them (issue #1277 path), applies 76–113. A
+**fresh install needs no hop** (empty DB applies all migrations cleanly with the 1.2.0 image).
+
+**Cutover verified:** "Database migrations complete" (v113); OpenSearch indexes created;
+`S3_ACCESS_KEY_ID/…` + "S3 connectivity probe succeeded", `Storage backends available: [filesystem, s3]`;
+**background reindex 62 artifacts + 1 repository** into OpenSearch (artifacts index 62 docs, green);
+`artifacts.sys /health 200`, web UI 200, `/api/v1/search/quick` + `/trending` 200. Meilisearch
+decommissioned (workload + PVC + ExternalSecret deleted; manifests `git rm`).
+
+**Install-path:** `kubectl apply -k` already pulls in `opensearch/` + drops `meilisearch/` via the updated
+kustomization; install.sh: removed the obsolete meili OpenBao master_key, Meilisearch→OpenSearch strings;
+`container-images.txt` swapped meili→opensearch + added the two ghcr `1.2.0` images. NOTE: the live
+ingressroute + web `NEXT_PUBLIC_API_URL` carry the `development.cfapps.cool` *placeholder*; `kubectl apply`
+(unlike install.sh's sed) reverted them → patched the live objects to `sys` (git keeps the placeholder).
+
+_Checklist:_
+- [x] All 5 patches verified upstream → run official `ghcr.io/artifact-keeper/*:1.2.0` (no custom build)
+- [x] OpenSearch 2.19.5 stood up (1g heap, security off); Meilisearch decommissioned
+- [x] Backend 1.2.0 + Web 1.2.0; STORAGE_BACKEND=s3, S3_ACCESS_KEY_ID/SECRET keys, OPENSEARCH_URL
+- [x] rc.8→1.1.9→1.2.0 migration hop (upstream repair-null bug); v113, reindex 62 artifacts
+- [x] Verified: health 200, web 200, search 200, S3 storage OK; install.sh + container-images.txt updated
+- [x] Committed + pushed

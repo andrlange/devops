@@ -19,7 +19,7 @@ spec:
         - name: artifact-keeper-pull
       containers:
         - name: web
-          image: artifactory.cfapps.cool/docker-local/andrlange/artifact-keeper-web:v1.1.0-rc.8-patched-arm64
+          image: artifactory.cfapps.cool/docker-local/ghcr.io/artifact-keeper/artifact-keeper-web:1.2.0-arm64
           ports:
             - name: http
               containerPort: 3000

@@ -5,16 +5,15 @@ namespace: artifact-keeper
 
 resources:
   - namespace.yaml
-  # ExternalSecrets (DB, Meilisearch, S3 credentials)
+  # ExternalSecrets (DB, S3 credentials)
   - external-secrets.yaml
   # PostgreSQL
   - postgresql/pvc.yaml
   - postgresql/statefulset.yaml
   - postgresql/service.yaml
-  # Meilisearch
-  - meilisearch/pvc.yaml
-  - meilisearch/deployment.yaml
-  - meilisearch/service.yaml
+  # OpenSearch (search backend, replaced Meilisearch in v1.2.0)
+  - opensearch/statefulset.yaml
+  - opensearch/service.yaml
   # artifact-keeper backend
   - artifact-keeper/configmap.yaml
   - artifact-keeper/deployment.yaml

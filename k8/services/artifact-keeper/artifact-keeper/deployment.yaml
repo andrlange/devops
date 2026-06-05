@@ -33,19 +33,19 @@ spec:
           envFrom:
             - secretRef:
                 name: postgres-credentials
-        - name: wait-for-meilisearch
-          image: artifactory.cfapps.cool/docker-local/getmeili/meilisearch:v1.39.0-arm64
+        - name: wait-for-opensearch
+          image: artifactory.cfapps.cool/docker-local/opensearchproject/opensearch:2.19.5-arm64
           command:
             - sh
             - -c
             - |
-              until wget --no-verbose --spider http://meilisearch:7700/health 2>/dev/null; do
-                echo "Waiting for Meilisearch..."
-                sleep 2
+              until curl -sf http://opensearch:9200/_cluster/health >/dev/null 2>&1; do
+                echo "Waiting for OpenSearch..."
+                sleep 3
               done
       containers:
         - name: artifact-keeper
-          image: artifactory.cfapps.cool/docker-local/andrlange/artifact-keeper-backend:v1.1.0-rc.8-patched-arm64
+          image: artifactory.cfapps.cool/docker-local/ghcr.io/artifact-keeper/artifact-keeper-backend:1.2.0-arm64
           ports:
             - name: http
               containerPort: 8080
@@ -69,18 +69,18 @@ spec:
                   key: POSTGRES_DB
             - name: DATABASE_URL
               value: postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)
-            # Meilisearch
-            - name: MEILISEARCH_URL
+            # OpenSearch (search backend, v1.2.0 — replaced Meilisearch)
+            - name: OPENSEARCH_URL
               valueFrom:
                 configMapKeyRef:
                   name: artifact-keeper-config
-                  key: MEILISEARCH_URL
-            - name: MEILISEARCH_API_KEY
+                  key: OPENSEARCH_URL
+            # S3 storage (Garage) — STORAGE_BACKEND=s3 required by v1.2.0
+            - name: STORAGE_BACKEND
               valueFrom:
-                secretKeyRef:
-                  name: meilisearch-credentials
-                  key: MEILI_MASTER_KEY
-            # S3 storage (Garage)
+                configMapKeyRef:
+                  name: artifact-keeper-config
+                  key: STORAGE_BACKEND
             - name: S3_ENDPOINT
               valueFrom:
                 configMapKeyRef:
@@ -96,12 +96,12 @@ spec:
                 configMapKeyRef:
                   name: artifact-keeper-config
                   key: S3_REGION
-            - name: S3_ACCESS_KEY
+            - name: S3_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
                   name: garage-s3-credentials
                   key: S3_ACCESS_KEY
-            - name: S3_SECRET_KEY
+            - name: S3_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: garage-s3-credentials
