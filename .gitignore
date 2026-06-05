@@ -27,3 +27,7 @@ CLAUDE.md
 /otel/
 /router/
 /vault/
+
+# Temporary migration secrets (registry push token, etc.) — never commit
+tmp.secret
+*.secret

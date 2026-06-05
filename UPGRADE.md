@@ -532,8 +532,16 @@ artifact-keeper), upload `installer-v1.2.0.sh` + `stack-v1.2.0.tgz` to the remot
 
 **What a wave is:** one atomic, independently verifiable, independently revertable change set. Never
 two risky changes in flight. Five rules: *(1)* atomic+reversible, *(2)* backup gate before any stateful
-wave, *(3)* mirror images ahead, *(4)* GitOps = bump-in-git → manual sync one app, *(5)* low-blast-radius
-first within a wave.
+wave, *(3)* mirror images ahead, *(4)* changes go in **source files** then `helm upgrade`/`kubectl apply`,
+*(5)* low-blast-radius first within a wave.
+
+> **★ Overriding goal — the INSTALL path must reach target state, not just the upgrade path.** A colleague
+> running the installer on a *naked* Mac must get the fully-upgraded stack. So every wave's version change
+> lands in the **source of truth** (`Chart.yaml`/`values.yaml`, raw manifests, `install.sh`, `config.env`,
+> the distribution), never as a live-only `kubectl`/`helm` tweak. The Helm model helps: the same chart
+> serves `helm install` (fresh) and `helm upgrade` (live). And the **remote registry must hold every
+> target `-arm64` image** so a fresh install can pull it (that's what Wave 1 is for). Definition of done
+> for each wave includes: *would a clean install from these files + registry produce target state?*
 
 **Standard backup gate** (run the relevant lines before every stateful wave; tag with the wave #):
 ```bash
@@ -821,7 +829,8 @@ after next week's Spring release.*
 
 | Wave | Status | Date | Commit |
 |---|---|---|---|
-| 0 — Stabilize & checkpoint | ✅ complete (incl. OpenBao key-loss recovery) | 2026-06-05 | _this commit_ |
+| 0 — Stabilize & checkpoint | ✅ complete (incl. OpenBao key-loss recovery) | 2026-06-05 | 922be1f |
+| 1 — Image supply chain | ✅ complete (28 target images mirrored) | 2026-06-05 | _this commit_ |
 
 ### Wave 0 — Stabilize & checkpoint
 
@@ -892,4 +901,36 @@ _Checklist:_
 - [x] Pinned the 4 versions in git (as-is)
 - [x] Health baseline recorded (node Ready v1.34.5, 0 bad pods, OpenBao unsealed, 48/48 synced)
 - [x] Backups: OpenBao volume tar ✅ + reseed-map ✅ / Velero ❌ (Garage BSL down) / Lima snapshot ❌ (vz unsupported)
+- [x] Log committed + pushed
+
+### Wave 1 — Image supply chain
+
+**Goal:** mirror all target `-arm64` images into the remote registry (`artifactory.cfapps.cool/docker-local`)
+so both the upgrade *and a clean install* can pull them; fix moved upstream sources.
+
+- **New reusable tool:** `k8/mirror-platform-images.sh` — source-resolving (probes candidate upstream
+  registries, uses the one that actually has the tag), idempotent (skips tags already present),
+  additive-only (never overwrites). This is the install-path artifact that populates the registry.
+- **Push auth:** the remote registry needed a write token. `svc-stack`/dev-token are pull-only and the
+  `artifactory/.env` admin password is rejected by the remote; user issued a temporary RW token, stored
+  in gitignored `tmp.secret` (revoke after migration). Note: the `k8/.env.local` "read-only" token
+  actually has write — worth tightening later.
+- **macOS prompt gotcha:** `~/.docker/config.json` has `credsStore: desktop`; crane invoking the Docker
+  Desktop credential helper caused both the repeated "iTerm wants to access other apps' data" TCC prompts
+  *and* multi-minute hangs. Fixed by running crane with a clean `DOCKER_CONFIG` (inline auth, no helper).
+- **Mirrored 27 + 1 already-present = 28 target images** (0 unresolved, 0 failed) for waves 2–8:
+  metallb v0.16.1, traefik v3.7.1, cert-manager v1.20.2 (×4), argocd v3.4.3 (quay.io), external-secrets
+  v2.5.0 (ghcr.io), portainer 2.39.3, garage v2.3.0, technitium 15.2.0, velero v1.18.1 + aws-plugin
+  v1.14.1, openbao 2.5.4 (quay.io), grafana 12.4.3 / loki 3.7.2 / mimir 3.1.0 / tempo 2.10.5 / alloy
+  v1.16.2, kube-state-metrics v2.19.0, node-exporter v1.11.1, trivy 0.71.0 (ghcr.io), postgres 17.10,
+  **opensearch 2.19.5** (Wave 7), gitlab-ce 18.11.4-ce.0 **and** 19.0.1-ce.0 (the required-stop hop),
+  gitlab-runner alpine-v19.0.1.
+- **Deferred to their waves (mirror just-in-time, moved sources):** kpack → **ghcr.io** (Wave 9),
+  RabbitMQ operator → **quay.io** (Wave 10), Contour/Envoy (Wave 9), CloudNativePG/Valkey (Wave 10).
+  These aren't `docker-local` refs today and need per-wave handling.
+
+_Checklist:_
+- [x] Push auth resolved (temp RW token in `tmp.secret`, gitignored)
+- [x] Built `k8/mirror-platform-images.sh` (source-resolving, idempotent, install-path tool)
+- [x] Mirrored 28 target images (verified pullable) — 0 failures
 - [x] Log committed + pushed
