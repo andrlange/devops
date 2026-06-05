@@ -3,9 +3,9 @@ name: openbao
 description: OpenBao secret management server (standalone mode)
 type: application
 version: 0.1.0
-appVersion: "2.5.1"
+appVersion: "2.5.4"
 
 dependencies:
   - name: openbao
-    version: "0.8.0"
+    version: "0.28.3"
     repository: https://openbao.github.io/openbao-helm

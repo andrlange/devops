@@ -3,7 +3,7 @@ external-secrets:
 
   image:
     repository: artifactory.cfapps.cool/docker-local/external-secrets/external-secrets
-    tag: v0.16.1-arm64
+    tag: v2.5.0-arm64
 
   imagePullSecrets:
     - name: artifact-keeper-pull
@@ -19,7 +19,7 @@ external-secrets:
   webhook:
     image:
       repository: artifactory.cfapps.cool/docker-local/external-secrets/external-secrets
-      tag: v0.16.1-arm64
+      tag: v2.5.0-arm64
     imagePullSecrets:
       - name: artifact-keeper-pull
     resources:
@@ -33,7 +33,7 @@ external-secrets:
   certController:
     image:
       repository: artifactory.cfapps.cool/docker-local/external-secrets/external-secrets
-      tag: v0.16.1-arm64
+      tag: v2.5.0-arm64
     imagePullSecrets:
       - name: artifact-keeper-pull
     resources:

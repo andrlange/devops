@@ -10,7 +10,7 @@ openbao:
     image:
       registry: artifactory.cfapps.cool
       repository: docker-local/openbao/openbao
-      tag: "2.5.1-arm64"
+      tag: "2.5.4-arm64"
       pullPolicy: IfNotPresent
 
     resources:

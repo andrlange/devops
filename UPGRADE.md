@@ -832,7 +832,8 @@ after next week's Spring release.*
 | 0 — Stabilize & checkpoint | ✅ complete (incl. OpenBao key-loss recovery) | 2026-06-05 | 922be1f |
 | 1 — Image supply chain | ✅ complete (28 target images mirrored) | 2026-06-05 | 67bb17d |
 | 2 — Host foundation (Lima + K3s) | ✅ complete (K3s 1.34.5→1.36.1) | 2026-06-05 | 39a4a52 |
-| 3 — Networking & TLS edge | ✅ complete (cert-manager, MetalLB, Traefik) | 2026-06-05 | _this commit_ |
+| 3 — Networking & TLS edge | ✅ complete (cert-manager, MetalLB, Traefik) | 2026-06-05 | eb95e5e |
+| 4 — Secrets backbone (OpenBao → ESO) 🔴 | ✅ complete (OpenBao 2.5.4, ESO 2.5.0) | 2026-06-05 | _this commit_ |
 
 ### Wave 0 — Stabilize & checkpoint
 
@@ -994,3 +995,30 @@ _Checklist:_
 - [x] Traefik → 40.2.0 / v3.7.1 (schema-checked, ingress+TLS verified 200/302)
 - [x] Vendored chart deps committed (install-path)
 - [x] Log committed + pushed
+
+### Wave 4 — Secrets backbone (OpenBao → ESO) 🔴
+
+**Goal:** OpenBao 0.8.0→0.28.3 / 2.5.1→2.5.4, then ESO 0.16.1→2.5.0 — the critical secret path. Order:
+store first, then sync. Pre-flight: Velero `wave4-pre` (Completed) + fresh ESO-CR export + OpenBao data tar.
+
+**Risk-reducer found in recon:** live ESO CRs are **already `external-secrets.io/v1`** (CRD storage=v1),
+so there was **no v1beta1→v1 data migration** to do. Target charts confirmed (openbao 0.28.3=v2.5.4,
+external-secrets 2.5.0=v2.5.0).
+
+- **OpenBao → 2.5.4 / chart 0.28.3:** values keys compatible. `helm upgrade` **failed first** — the new
+  chart changes an immutable StatefulSet field (the `volumeClaimTemplates` block; names match but
+  labels/spec differ). Fix (reusable for GitLab/Postgres later): `kubectl delete sts openbao
+  --cascade=orphan` (keeps pod + PVCs) → `helm upgrade` (recreates STS, adopts pod; selector+serviceName
+  matched) → `kubectl delete pod openbao-0` (OnDelete strategy → recreate on 2.5.4, **reuses
+  `data-openbao-0`**) → `bash k8/unseal.sh`. Result: 2.5.4 unsealed, **data preserved**, ESO still Valid + 48/48.
+- **ESO → 2.5.0 (major):** migrated **14 real repo manifests** `external-secrets.io/v1beta1` → `/v1`
+  (install-path; docs `.md` left as-is). `installCRDs: true` still valid in 2.5.0; values keys compatible;
+  dry-run clean. `helm upgrade` rolled controller+webhook+cert-controller to v2.5.0. **ClusterSecretStore
+  Valid, all 48 ExternalSecrets SecretSynced, 0 bad pods.**
+
+_Checklist:_
+- [x] Pre-flight backup + exports
+- [x] OpenBao → 2.5.4 (orphan-recreate STS, data preserved, unsealed)
+- [x] ESO repo manifests v1beta1 → v1 (install-path)
+- [x] ESO → 2.5.0; ClusterSecretStore Valid, 48/48 SecretSynced
+- [x] Vendored chart deps committed; log committed + pushed
