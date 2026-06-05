@@ -280,10 +280,14 @@ substitute_domains() {
     fi
   done < <(find "${K8_DIR}" "${K8_DIR}/../demos" -type f \( -name "*.yaml" -o -name "*.yml" -o -name "*.toml" -o -name "*.kt" -o -name "*.sh" -o -name "*.properties" -o -name "*.md" -o -name "*.html" \) -print0 2>/dev/null)
 
-  # Also update config.env
+  # Also update config.env — persist the source-of-truth vars; PLATFORM_DOMAIN/APPS_DOMAIN
+  # stay derived (${PLATFORM_SUBDOMAIN}.${DNS_ZONE}) and resolve when sourced.
+  local platform_sub="${platform_domain%%.*}"
+  local apps_sub="${apps_domain%%.*}"
   sed -i '' \
-    -e "s/^PLATFORM_DOMAIN=.*/PLATFORM_DOMAIN=\"${platform_domain}\"/" \
-    -e "s/^APPS_DOMAIN=.*/APPS_DOMAIN=\"${apps_domain}\"/" \
+    -e "s/^DNS_ZONE=.*/DNS_ZONE=\"${base_domain}\"/" \
+    -e "s/^PLATFORM_SUBDOMAIN=.*/PLATFORM_SUBDOMAIN=\"${platform_sub}\"/" \
+    -e "s/^APPS_SUBDOMAIN=.*/APPS_SUBDOMAIN=\"${apps_sub}\"/" \
     -e "s/^ACME_EMAIL=.*/ACME_EMAIL=\"${acme_email}\"/" \
     -e "s/^ACME_DNS_ZONES_CLOUDDNS=.*/ACME_DNS_ZONES_CLOUDDNS=\"${base_domain}\"/" \
     "${K8_DIR}/config.env"
@@ -389,20 +393,21 @@ cmd_zero() {
   print_section "3. Domain Settings"
   echo ""
 
-  local cfg_base_domain
+  # Configurable: base DNS zone + subdomain prefixes. Platform services live under
+  # <platform-prefix>.<zone>, application routes under <apps-prefix>.<zone>.
+  local cfg_dns_zone
   while true; do
-    cfg_base_domain=$(ask "Platform domain (e.g. sys.<domain>)" "${PLATFORM_DOMAIN:-sys.cfapps.cool}")
-    if validate_domain "$cfg_base_domain"; then break; fi
+    cfg_dns_zone=$(ask "Base DNS zone you control (DOMAIN.TLD)" "${DNS_ZONE:-cfapps.cool}")
+    if validate_domain "$cfg_dns_zone"; then break; fi
   done
-
-  # Derive base TLD from platform domain (e.g., "development.yotta-cloud.net" → "yotta-cloud.net")
-  local derived_tld="${cfg_base_domain#*.}"
-  if [[ -z "$derived_tld" ]] || [[ "$derived_tld" == "$cfg_base_domain" ]]; then
-    derived_tld="$cfg_base_domain"
-  fi
-
-  local cfg_apps_domain
-  cfg_apps_domain=$(ask "Apps domain" "${APPS_DOMAIN:-app.${derived_tld}}")
+  local cfg_platform_sub cfg_apps_sub
+  cfg_platform_sub=$(ask "Platform/management subdomain prefix" "${PLATFORM_SUBDOMAIN:-sys}")
+  cfg_apps_sub=$(ask "Applications subdomain prefix" "${APPS_SUBDOMAIN:-app}")
+  # Derived full domains (consumed by the rest of the installer + wildcard certs)
+  local cfg_base_domain="${cfg_platform_sub}.${cfg_dns_zone}"
+  local cfg_apps_domain="${cfg_apps_sub}.${cfg_dns_zone}"
+  log_info "  Platform services → *.${cfg_base_domain}"
+  log_info "  Application routes → *.${cfg_apps_domain}"
 
   local cfg_acme_email
   while true; do
@@ -540,6 +545,9 @@ METALLB_IP_RANGE="${cfg_metallb_range}"
 
 # --- Domain ------------------------------------------------------------------
 BASE_DOMAIN="${cfg_base_domain}"
+DNS_ZONE="${cfg_dns_zone}"
+PLATFORM_SUBDOMAIN="${cfg_platform_sub}"
+APPS_SUBDOMAIN="${cfg_apps_sub}"
 PLATFORM_DOMAIN="${cfg_base_domain}"
 APPS_DOMAIN="${cfg_apps_domain}"
 ACME_EMAIL="${cfg_acme_email}"
