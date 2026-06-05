@@ -2,10 +2,10 @@ apiVersion: v2
 name: tempo
 description: Grafana Tempo distributed tracing with Garage S3 backend
 version: 0.1.0
-appVersion: "2.10.3"
+appVersion: "2.10.5"
 type: application
 
 dependencies:
   - name: tempo
-    version: "1.24.4"
-    repository: https://grafana.github.io/helm-charts
+    version: "2.2.0"
+    repository: https://grafana-community.github.io/helm-charts

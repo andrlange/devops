@@ -2,7 +2,7 @@ grafana:
   image:
     registry: artifactory.cfapps.cool
     repository: docker-local/grafana/grafana
-    tag: "12.4.1-arm64"
+    tag: "12.4.3-arm64"
     pullPolicy: IfNotPresent
 
   imagePullSecrets:
@@ -27,7 +27,7 @@ grafana:
       datasources:
         - name: Loki
           type: loki
-          url: http://loki.loki.svc:3100
+          url: http://loki.monitoring.svc:3100
           access: proxy
           isDefault: false
           editable: true
@@ -41,7 +41,7 @@ grafana:
 
         - name: Tempo
           type: tempo
-          url: http://tempo.tempo.svc:3100
+          url: http://tempo.monitoring.svc:3200
           access: proxy
           isDefault: false
           editable: true

@@ -8,16 +8,30 @@ alloy:
   image:
     registry: artifactory.cfapps.cool
     repository: docker-local/grafana/alloy
-    tag: v1.14.1-arm64
+    tag: v1.16.2-arm64
 
   configReloader:
     image:
       registry: artifactory.cfapps.cool
       repository: docker-local/prometheus-operator/prometheus-config-reloader
+      tag: v0.91.0-arm64
+      digest: ""   # clear chart's pinned amd64 digest so the arm64 tag is used
 
   alloy:
     clustering:
       enabled: false
+
+    # Mount host log directories for pod log collection (chart nests these under `alloy:`)
+    mounts:
+      varlog: true
+
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 500m
 
     configMap:
       create: true
@@ -39,6 +53,7 @@ alloy:
           rule {
             source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
             separator     = "/"
+            regex         = "(.+)/(.+)"
             target_label  = "__path__"
             replacement   = "/var/log/pods/*$1/$2/*.log"
           }
@@ -86,9 +101,16 @@ alloy:
           }
         }
 
+        // Expand the __path__ globs into concrete log files on disk.
+        // loki.source.file does NOT glob-expand; local.file_match does the
+        // filesystem discovery and yields concrete file targets.
+        local.file_match "pods" {
+          path_targets = discovery.relabel.pods.output
+        }
+
         // Collect log files from discovered pods
         loki.source.file "pods" {
-          targets    = discovery.relabel.pods.output
+          targets    = local.file_match.pods.targets
           forward_to = [loki.process.pods.receiver]
         }
 
@@ -110,7 +132,7 @@ alloy:
         // Send logs to Loki
         loki.write "default" {
           endpoint {
-            url = "http://loki.loki.svc:3100/loki/api/v1/push"
+            url = "http://loki.monitoring.svc:3100/loki/api/v1/push"
           }
         }
 
@@ -266,18 +288,6 @@ alloy:
 
   controller:
     type: daemonset
-
-  resources:
-    requests:
-      memory: 128Mi
-      cpu: 100m
-    limits:
-      memory: 512Mi
-      cpu: 500m
-
-  # Mount host log directories for pod log collection
-  mounts:
-    varlog: true
 
   serviceAccount:
     create: true

@@ -17,7 +17,7 @@ spec:
         - name: artifact-keeper-pull
       containers:
         - name: mimir
-          image: artifactory.cfapps.cool/docker-local/grafana/mimir:3.0.4-arm64
+          image: artifactory.cfapps.cool/docker-local/grafana/mimir:3.1.0-arm64
           args:
             - -config.file=/etc/mimir/mimir.yaml
             - -target=all

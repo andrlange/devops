@@ -2,7 +2,7 @@ tempo:
   tempo:
     registry: artifactory.cfapps.cool
     repository: docker-local/grafana/tempo
-    tag: "2.9.0-arm64"
+    tag: "2.10.5-arm64"
     pullPolicy: IfNotPresent
     imagePullSecrets:
       - name: artifact-keeper-pull

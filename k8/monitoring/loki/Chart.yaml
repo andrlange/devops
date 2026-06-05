@@ -2,10 +2,10 @@ apiVersion: v2
 name: loki
 description: Grafana Loki log aggregation with Garage S3 backend
 version: 0.1.0
-appVersion: "3.6.7"
+appVersion: "3.7.2"
 type: application
 
 dependencies:
   - name: loki
-    version: "6.55.0"
-    repository: https://grafana.github.io/helm-charts
+    version: "17.1.6"
+    repository: https://grafana-community.github.io/helm-charts

@@ -2,7 +2,7 @@ apiVersion: v2
 name: grafana
 description: Grafana observability dashboards with Loki, Mimir, and Tempo datasources
 version: 0.1.0
-appVersion: "12.4.1"
+appVersion: "12.4.3"
 type: application
 
 dependencies:

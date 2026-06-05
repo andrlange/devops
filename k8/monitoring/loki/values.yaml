@@ -9,7 +9,7 @@ loki:
     image:
       registry: artifactory.cfapps.cool
       repository: docker-local/grafana/loki
-      tag: 3.6.7-arm64
+      tag: 3.7.2-arm64
 
     auth_enabled: false
 

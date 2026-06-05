@@ -1058,3 +1058,58 @@ _Checklist:_
 - [x] Technitium 15.2.0 (major; PV migrated, DNS verified)
 - [x] Velero v1.18.1 + plugin v1.14.1 (vendored chart 12.0.2; test backup passed)
 - [x] Vendored chart deps committed; log committed + pushed
+
+### Wave 6 — Monitoring (LGTM)
+
+**Goal:** KSM/node-exporter/Alloy → Tempo → Loki/Grafana (grafana-community repo move) → Mimir 3.1, on
+both live + install path. Pre-flight: Velero `wave6-monitoring` (monitoring,mimir) — Completed.
+
+**Order & results (low→high blast radius):**
+- **kube-state-metrics 2.18.0 → 2.19.0** (chart 7.2.2 → 7.4.0, prometheus-community). Clean.
+- **node-exporter 1.10.2 → 1.11.1** (chart 4.52.2 → 4.55.0, prometheus-community). Clean.
+- **Alloy v1.14.1 → v1.16.2** (chart 1.6.2 → 1.8.2, stays in grafana repo). Chart pins config-reloader
+  `v0.91.0@sha256:…` (amd64 digest) → mirrored `prometheus-config-reloader:v0.91.0-arm64` and pinned
+  `configReloader.image.tag` + `digest: ""` to drop the digest.
+- **Tempo 2.9.0 → 2.10.5** (chart **repo move** grafana → `grafana-community`, 1.24.4 → **2.2.0**
+  single-binary; fixes the prior 2.9.0↔2.10.3 drift). STS selector + `storage` VCT unchanged → in-place.
+  S3 creds passed via a temp `-f` overlay (sourced from the live configmap; never committed — `install.sh`
+  still sed-patches the `TEMPO_S3_*_PLACEHOLDER`s on a fresh install).
+- **Loki 3.6.7 → 3.7.2** (chart **repo move** grafana → `grafana-community`, 6.55.0 → **17.1.6**; schema
+  fully compatible). Creds via env from `loki-s3-credentials`. STS selector + `storage` VCT unchanged.
+- **Grafana 12.4.1 → 12.4.3** (image-tag only). **Kept chart `grafana/grafana` 10.5.15** — the
+  `grafana-community/grafana` 12.x charts ship appVersion **13.0.1** (AngularJS removed); staying on the
+  frozen old-repo chart bumps the binary to 12.4.3 without the 13.0 dashboard-audit risk (deferred).
+- **Mimir 3.0.4 → 3.1.0** (raw Deployment): `kubectl set image`. Already on 3.x so all TSDB blocks are
+  index-v2 (no block migration needed); config carries no removed flags. New emptyDir rebuilds
+  sparse-index-headers from Garage on start (benign warnings).
+
+**🔴 Helm/ESO release-manifest fix (loki, grafana, tempo):** their revision-1 manifests (pre-Wave-4)
+embedded `external-secrets.io/v1beta1` ExternalSecrets; that CRD version is gone, so `helm upgrade`
+failed building the *current* release. Patched each stored `sh.helm.release.v1.<r>.v1` secret
+`v1beta1 → v1` (metadata only; live objects already v1). Then SSA field-ownership conflicts
+(`before-first-apply` owns `.spec.data`) → resolved by `kubectl delete externalsecret … --cascade=orphan`
+(keeps the synced secret) before the upgrade so helm recreates+adopts it cleanly.
+
+**🟢 Logging pipeline repaired (was never functional — 3 latent bugs, all fixed at source):**
+1. `mounts.varlog`/`resources` were nested at `alloy.*` but the chart expects them under `alloy.alloy.*`
+   → `/var/log` host mount was never created. Re-nested correctly.
+2. `__path__` relabel used the default regex → `$1=uid/container`, `$2=empty` → double-slash glob
+   (`/container//*.log`) Alloy v1.16's globber won't match. Added explicit `regex = "(.+)/(.+)"`.
+3. `loki.source.file` does **not** glob-expand; inserted a `local.file_match "pods"` stage between
+   `discovery.relabel` and `loki.source.file` (the documented Alloy file-discovery pattern).
+   Also fixed wrong service DNS: Alloy `loki.write` + Grafana datasources pointed at `loki.loki.svc` /
+   `tempo.tempo.svc:3100` — but both run in `monitoring` → corrected to `loki.monitoring.svc` /
+   `tempo.monitoring.svc:3200`.
+
+**Verified end-to-end:** Mimir `up` returns live targets; Alloy `files_active=99`,
+`loki_write_sent_entries_total>3.2k` to `loki.monitoring.svc`; Loki has 24 namespaces + real log lines;
+Grafana datasources Loki/Mimir/Tempo all **health=OK**. All 8 components at target, 0 bad pods.
+
+_Checklist:_
+- [x] KSM 2.19.0, node-exporter 1.11.1, Alloy v1.16.2 (config-reloader v0.91.0-arm64 mirrored)
+- [x] Tempo 2.10.5, Loki 3.7.2 (both repo-moved to grafana-community)
+- [x] Grafana 12.4.3 (image-only; chart kept at 10.5.15 to avoid Grafana 13/Angular)
+- [x] Mimir 3.1.0 (raw; index-v2 confirmed)
+- [x] Stored helm release manifests patched v1beta1→v1; ESO SSA conflicts resolved
+- [x] Logging pipeline fixed (varlog mount, path regex, local.file_match, service DNS) — logs flow to Loki
+- [x] Vendored chart deps committed; log committed + pushed
