@@ -32,9 +32,9 @@ configs:
 REGISTRIES
 
 # ---- Install K3s -------------------------------------------------
-# Pinned (Wave 0, 2026-06-05) to the currently-running version for deterministic installs.
-# Upgrade target is 1.36.x (Wave 2): bump this via the 1.34 -> 1.35 -> 1.36 hop.
-curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="v1.34.5+k3s1" INSTALL_K3S_EXEC="server" sh -s - \
+# Pinned to the campaign target (Wave 2, 2026-06-05). Fresh installs go straight to 1.36;
+# the existing cluster was upgraded in-place via the 1.34.5 -> 1.35.5 -> 1.36.1 hop.
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="v1.36.1+k3s1" INSTALL_K3S_EXEC="server" sh -s - \
   --disable servicelb \
   --disable traefik \
   --write-kubeconfig-mode 644 \

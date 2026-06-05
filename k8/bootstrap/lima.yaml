@@ -10,9 +10,12 @@
 vmType: vz
 plain: true
 
-rosetta:
-  enabled: true
-  binfmt: true
+# Lima 2.x: rosetta moved under vmOpts.vz (top-level 'rosetta' is deprecated)
+vmOpts:
+  vz:
+    rosetta:
+      enabled: true
+      binfmt: true
 
 cpus: 8
 memory: 48GiB

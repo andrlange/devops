@@ -830,7 +830,8 @@ after next week's Spring release.*
 | Wave | Status | Date | Commit |
 |---|---|---|---|
 | 0 — Stabilize & checkpoint | ✅ complete (incl. OpenBao key-loss recovery) | 2026-06-05 | 922be1f |
-| 1 — Image supply chain | ✅ complete (28 target images mirrored) | 2026-06-05 | _this commit_ |
+| 1 — Image supply chain | ✅ complete (28 target images mirrored) | 2026-06-05 | 67bb17d |
+| 2 — Host foundation (Lima + K3s) | ✅ complete (K3s 1.34.5→1.36.1) | 2026-06-05 | _this commit_ |
 
 ### Wave 0 — Stabilize & checkpoint
 
@@ -933,4 +934,31 @@ _Checklist:_
 - [x] Push auth resolved (temp RW token in `tmp.secret`, gitignored)
 - [x] Built `k8/mirror-platform-images.sh` (source-resolving, idempotent, install-path tool)
 - [x] Mirrored 28 target images (verified pullable) — 0 failures
+- [x] Log committed + pushed
+
+### Wave 2 — Host foundation (Lima + K3s)
+
+**Goal:** upgrade the substrate to the campaign target — K3s **1.34.5 → 1.36.1** — and ensure a fresh
+install lands there too.
+
+- **Lima:** already on 2.1.0 (latest line); `bootstrap/lima.yaml` validates. No risky VM rebuild needed.
+  Tidied the Lima-2.x deprecation: top-level `rosetta` → `vmOpts.vz.rosetta` (install-path correctness).
+- **Install path:** `k8/bootstrap/install-k3s.sh` pinned `INSTALL_K3S_VERSION` → **v1.36.1+k3s1** (a fresh
+  install goes straight to 1.36; no hop needed for a clean system).
+- **Live upgrade (in-place, one minor at a time, exact `--disable servicelb,traefik` flags preserved):**
+  - Pre-flight: fresh OpenBao data tar + **Velero `wave2-pre` resources backup (Completed, 0 errors)**;
+    all apiservices Available; CRD groups all operator-served (no core beta APIs removed by 1.35/1.36).
+  - Hop 1 → **v1.35.5+k3s1**: node Ready, **0 bad pods, OpenBao stayed unsealed** (in-place upgrade kept
+    workload pods running — only the control plane restarted), 48/48 ExternalSecrets synced.
+  - Hop 2 → **v1.36.1+k3s1**: node Ready, 0 bad pods, OpenBao unsealed, ClusterSecretStore Valid, 48/48 synced.
+- **kpack client-go skew check (the linchpin):** kpack (client-go 0.30) **works fine on K8s 1.36** —
+  controller+webhook Running, CRDs served (3 Images / 4 Builds readable), ClusterBuilder ready, **no
+  client-go/API errors** in logs. Confirms the Chapter 2 call: wide skew is a policy gap, not a functional
+  one. (Full `cf push` validation deferred to Wave 9.) Korifi api+controllers healthy.
+
+_Checklist:_
+- [x] Pre-flight backup (Velero resources + OpenBao tar)
+- [x] Install-path pinned to v1.36.1+k3s1; lima.yaml 2.x-clean
+- [x] Live hop 1.34.5 → 1.35.5 → 1.36.1, healthy after each
+- [x] kpack/Korifi verified functional on 1.36
 - [x] Log committed + pushed
