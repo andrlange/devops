@@ -831,7 +831,8 @@ after next week's Spring release.*
 |---|---|---|---|
 | 0 — Stabilize & checkpoint | ✅ complete (incl. OpenBao key-loss recovery) | 2026-06-05 | 922be1f |
 | 1 — Image supply chain | ✅ complete (28 target images mirrored) | 2026-06-05 | 67bb17d |
-| 2 — Host foundation (Lima + K3s) | ✅ complete (K3s 1.34.5→1.36.1) | 2026-06-05 | _this commit_ |
+| 2 — Host foundation (Lima + K3s) | ✅ complete (K3s 1.34.5→1.36.1) | 2026-06-05 | 39a4a52 |
+| 3 — Networking & TLS edge | ✅ complete (cert-manager, MetalLB, Traefik) | 2026-06-05 | _this commit_ |
 
 ### Wave 0 — Stabilize & checkpoint
 
@@ -961,4 +962,35 @@ _Checklist:_
 - [x] Install-path pinned to v1.36.1+k3s1; lima.yaml 2.x-clean
 - [x] Live hop 1.34.5 → 1.35.5 → 1.36.1, healthy after each
 - [x] kpack/Korifi verified functional on 1.36
+- [x] Log committed + pushed
+
+### Wave 3 — Networking & TLS edge
+
+**Goal:** upgrade the edge (cert-manager, MetalLB, Traefik) on both the live cluster and the install path.
+Mechanism per component: bump wrapper `Chart.yaml` (dep + appVersion) + `values.yaml` image tag →
+`helm dependency update` (vendors the new dep `.tgz`) → `helm upgrade`. Vendored `charts/*.tgz` are
+committed so a fresh `helm install` uses the same versions. Pre-flight: Velero `wave3-pre` (Completed).
+
+- **cert-manager 1.20.0 → 1.20.2** (patch): all 4 images on v1.20.2-arm64, rollout clean, wildcard certs
+  stay Ready. (Note: the controller image tag had a different indent than cainjector/webhook/acmesolver —
+  needed a separate edit.)
+- **MetalLB 0.15.3 → 0.16.1** (minor): controller+speaker on v0.16.1-arm64, LB IPs intact (200–203),
+  L2Advertisement present. **Breaking-default caught:** chart 0.16 turns on **`frrk8s` by default** (extra
+  pods pulling an un-mirrored `quay.io/metallb/frr-k8s` image, only for BGP/FRR). We run **L2 mode** →
+  set `frrk8s.enabled: false` to keep the lean native-speaker setup.
+- **Traefik chart 39.0.5 → 40.2.0 / app v3.6.10 → v3.7.1** (🔴 major chart): all our value keys still
+  exist in the 40.2.0 schema; `--dry-run` passed; upgrade clean, single v3.7.1 pod. Routing+TLS verified
+  via the LB IP — argocd **200**, grafana **302**, artifacts **200**, served cert `*.sys.cfapps.cool`.
+
+**Discovery (pre-existing, flag for install-path):** the **live platform's domain is `sys.cfapps.cool`**,
+not the `development.cfapps.cool` placeholder in `config.env` / some hardcoded values (e.g. the Traefik
+dashboard matchRule). Live IngressRoutes are all `*.sys.cfapps.cool`. A fresh install from the repo would
+use whatever `config.env`/iteration-zero sets — the domain is install-time configurable, so the hardcoded
+`development.cfapps.cool` references should ideally be templated. Not a Wave 3 regression; needs a decision.
+
+_Checklist:_
+- [x] cert-manager → 1.20.2 (certs Ready)
+- [x] MetalLB → 0.16.1, frrk8s disabled (L2 intact, IPs 200–203)
+- [x] Traefik → 40.2.0 / v3.7.1 (schema-checked, ingress+TLS verified 200/302)
+- [x] Vendored chart deps committed (install-path)
 - [x] Log committed + pushed

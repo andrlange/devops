@@ -2,7 +2,7 @@ metallb:
   controller:
     image:
       repository: artifactory.cfapps.cool/docker-local/metallb/controller
-      tag: "v0.15.3-arm64"
+      tag: "v0.16.1-arm64"
     resources:
       requests:
         memory: 128Mi
@@ -14,7 +14,7 @@ metallb:
   speaker:
     image:
       repository: artifactory.cfapps.cool/docker-local/metallb/speaker
-      tag: "v0.15.3-arm64"
+      tag: "v0.16.1-arm64"
     resources:
       requests:
         memory: 64Mi
@@ -24,6 +24,11 @@ metallb:
         cpu: 100m
     frr:
       enabled: false
+
+  # We run L2 mode only — disable frr-k8s (default-on since chart 0.16; needs an
+  # un-mirrored quay.io/metallb/frr-k8s image and is only for BGP/FRR mode).
+  frrk8s:
+    enabled: false
 
   global:
     imagePullSecrets:

@@ -8,25 +8,25 @@ cert-manager:
   image:
     registry: artifactory.cfapps.cool
     repository: docker-local/jetstack/cert-manager-controller
-    tag: v1.20.0-arm64
+    tag: v1.20.2-arm64
 
   cainjector:
     image:
       registry: artifactory.cfapps.cool
       repository: docker-local/jetstack/cert-manager-cainjector
-      tag: v1.20.0-arm64
+      tag: v1.20.2-arm64
 
   webhook:
     image:
       registry: artifactory.cfapps.cool
       repository: docker-local/jetstack/cert-manager-webhook
-      tag: v1.20.0-arm64
+      tag: v1.20.2-arm64
 
   acmesolver:
     image:
       registry: artifactory.cfapps.cool
       repository: docker-local/jetstack/cert-manager-acmesolver
-      tag: v1.20.0-arm64
+      tag: v1.20.2-arm64
 
   startupapicheck:
     enabled: false

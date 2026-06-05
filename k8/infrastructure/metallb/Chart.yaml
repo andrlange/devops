@@ -3,9 +3,9 @@ name: metallb
 description: MetalLB load-balancer for bare-metal Kubernetes clusters
 type: application
 version: 0.1.0
-appVersion: "v0.15.3"
+appVersion: "v0.16.1"
 
 dependencies:
   - name: metallb
-    version: "0.15.3"
+    version: "0.16.1"
     repository: https://metallb.github.io/metallb
