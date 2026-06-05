@@ -1168,3 +1168,46 @@ _Checklist:_
 - [x] rc.8→1.1.9→1.2.0 migration hop (upstream repair-null bug); v113, reindex 62 artifacts
 - [x] Verified: health 200, web 200, search 200, S3 storage OK; install.sh + container-images.txt updated
 - [x] Committed + pushed
+
+### Wave 8 — GitLab CE 18.10 → 19.0.1 + Runner 🔴
+
+**Goal:** GitLab CE `18.10.0 → 19.0.1` via required stops, Runner `18.10.0 → 19.0.1`, on both live +
+install path. Pre-flight: Velero `wave8-gitlab` (gitlab,gitlab-runner) — Completed (rollback point to 18.10.0).
+
+GitLab CE is a single **omnibus StatefulSet** (bundled PG/Redis/Gitaly, data on 3 PVCs); upgrade =
+image bump + restart, omnibus runs `gitlab-ctl reconfigure` + DB migrations on startup (~8–12 min/hop).
+Bumped via `kubectl set image` (raw-STS, image-only — preserves the gitlab.rb configmap + live env).
+**Required-stop path (one minor at a time, migration-gated):**
+- **18.10.0 → 18.10.7** (latest 18.10 patch): bg-migrations clean (0). ✓
+- **18.10.7 → 18.11.4** (required stop): 1 active bg-migration `BackfillNamespaceTemplateSettings`
+  self-completed via Sidekiq → bg clean (0), 0 failed. ✓ (gate: `batched_background_migrations`
+  `status <> 3` must be 0 before crossing the next stop.)
+- **18.11.4 → 19.0.1** (major): 0 down schema migs, 0 failed; **18 post-19.0 bg-migrations queued** and
+  drain via Sidekiq (final target, not gated — they finish in the background, 0 failed).
+
+Verified at each stop: in-pod `/-/readiness` 200, `gitlab.sys/users/sign_in` 200. (`/-/health` & `/-/readiness`
+404 *externally* = GitLab's monitoring-IP allowlist, normal.) Final version `gitlab-ce 19.0.1`.
+
+**Runner:** consolidated to a single hop (runner is forward/back-compatible and was ≤ CE throughout, so
+the intermediate 0.88.3 was unnecessary). Chart **0.87.0 → 0.89.1** / image **alpine-v18.10.0 →
+alpine-v19.0.1**, vendored `charts/gitlab-runner-0.89.1.tgz`. `helm upgrade --set gitlab-runner.gitlabUrl=
+https://gitlab.sys.cfapps.cool/` (else the development.cfapps.cool placeholder reverts the live URL).
+🔴 Same **stored-release v1beta1** issue as Wave 6 (runner release rev-1 embeds an ESO v1beta1 secret) →
+patched `sh.helm.release.v1.gitlab-runner.v1` v1beta1→v1 + `--cascade=orphan` ES delete (keeps the
+registration secret) before the upgrade. Runner binary 19.0.1, "Configuration loaded", ES re-synced.
+
+**Install-path:** git = final 19.0.1 / runner 0.89.1 (a fresh install initializes GitLab at 19.0.1 directly —
+no hop; the 18.10.7/18.11.4 stops are live-upgrade-only). Images 18.10.7-ce.0, 18.11.4-ce.0, 19.0.1-ce.0
+(arm64) + runner alpine-v18.11.3/v19.0.1 mirrored.
+
+**Side-fix (user-reported):** Traefik dashboard `traefik.sys` was 404 — live IngressRoute carried the
+`traefik.development.cfapps.cool` placeholder (reverted by the Wave 3 traefik helm upgrade). values.yaml
+uses the placeholder (install.sh seds it → install path fine); patched the **live** route to `sys` →
+root 302 / `/dashboard/` 200.
+
+_Checklist:_
+- [x] CE 18.10.0 → 18.10.7 → 18.11.4 → 19.0.1 (required stops; bg-migrations gated clean at each stop)
+- [x] Runner chart 0.87.0 → 0.89.1, image alpine-v19.0.1 (vendored); gitlabUrl pinned to sys; ES re-synced
+- [x] Stored runner helm-release patched v1beta1→v1 (Wave 6 pattern)
+- [x] Verified 19.0.1 healthy, runner connected (binary 19.0.1); post-19.0 bg-migrations draining (0 failed)
+- [x] Traefik dashboard live route fixed to sys; committed + pushed

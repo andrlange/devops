@@ -20,7 +20,7 @@ spec:
         - name: artifact-keeper-pull
       containers:
         - name: gitlab
-          image: artifactory.cfapps.cool/docker-local/gitlab/gitlab-ce:18.10.0-ce.0-arm64
+          image: artifactory.cfapps.cool/docker-local/gitlab/gitlab-ce:19.0.1-ce.0-arm64
           ports:
             - name: http
               containerPort: 80
