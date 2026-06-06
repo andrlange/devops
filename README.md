@@ -30,6 +30,78 @@ secrets, artifacts, storage, DNS, networking, certificates, and disaster recover
 
 ---
 
+## Version update — v1.1.2 → v1.2.0 ("latest everywhere")
+
+This release is the result of a stack-wide upgrade campaign that moved every component to its current
+version, swapped the artifact-keeper search backend, and moved registry storage onto S3. Highlights:
+
+- **artifact-keeper rebased to the official 1.2.0 images** (custom `-patched` build dropped — all patches are now upstream).
+- **Meilisearch removed → OpenSearch 2.19.5** as artifact-keeper's search backend (a backend swap + reindex, not a bump).
+- **Storage backend moved to S3 (Garage)** for both the in-cluster artifact-keeper and the Korifi image registry (was ephemeral filesystem; now durable).
+- **Brokers rebuilt** (Go 1.26.4 / client-go 0.36.1) and broker-managed workloads (RabbitMQ, Valkey, PostgreSQL) now pulled from artifactory.
+- **kappman is now a see-all Korifi admin** via Korifi role propagation — it sees every org/space, including ones created later by anyone.
+
+### Components upgraded (from → to)
+
+| Component | From | To |
+|---|---|---|
+| K3s | 1.34.5 | **1.36.1** |
+| OpenBao | 2.5.1 | **2.5.4** |
+| External Secrets Operator | 0.16.1 | **2.5.0** (CRD `v1beta1` → `v1`) |
+| MetalLB | 0.15.3 | **0.16.1** |
+| Traefik | v3.6.10 | **v3.7.1** |
+| cert-manager | 1.20.0 | **1.20.2** |
+| ArgoCD | (prev) | **v3.4.3** |
+| Portainer | (prev) | **2.39.3** |
+| Garage (S3) | (prev) | **v2.3.0** |
+| Technitium DNS | 14.3.0 | **15.2.0** |
+| Velero | v1.18.0 | **v1.18.1** (AWS plugin v1.14.1) |
+| Grafana | (prev) | **12.4.3** |
+| Loki | (prev) | **3.7.2** |
+| Mimir | 3.0.4 | **3.1.0** |
+| Tempo | (prev) | **2.10.5** |
+| Alloy | (prev) | **v1.16.2** |
+| kube-state-metrics | v2.18.0 | **v2.19.0** |
+| node-exporter | (prev) | **v1.11.1** |
+| artifact-keeper (backend + web) | v1.1.0-rc.8-patched | **1.2.0** (official images) |
+| Trivy scanner | 0.69.3 | **0.71.0** |
+| GitLab CE | 18.10.0 | **19.0.1** (via required stop 18.11.4) |
+| GitLab Runner | 0.87.0 | **0.89.1** |
+| kpack (self-built arm64) | 0.17.0 | **0.17.1** |
+| Contour / Envoy | v1.33.3 / v1.35.9 | **v1.33.5 / distroless-v1.35.10** |
+| CloudNativePG operator | 1.28.1 | **1.29.1** (chart 0.27.1 → 0.28.2) |
+| RabbitMQ Cluster Operator | v2.20.0 | **v2.21.0** |
+| cf-service-broker (Go) | 1.4.0 | **1.7.0** (Go 1.26.4, client-go 0.36.1) |
+| cf-marketplace-broker (Go) | 1.0.0 | **1.2.0** (Go 1.26.4, client-go 0.36.1) |
+| Broker-managed: RabbitMQ / Valkey / CNPG PostgreSQL | (defaults) | **4.3.1 / 8.1-alpine / 18.1** (served from artifactory) |
+| Distribution (installer + stack) | v1.1.2 | **v1.2.0** |
+
+### Added
+
+| Component | Why |
+|---|---|
+| **OpenSearch 2.19.5** | artifact-keeper search backend (replaces Meilisearch). |
+| **`ops/` lifecycle scripts** | Host-side full Lima VM `backup_full.sh` / `delete_full.sh` / `restore_full.sh` (APFS-clone based). |
+
+### Removed
+
+| Component | Reason |
+|---|---|
+| **Meilisearch** | Dropped by artifact-keeper 1.2.0; replaced by OpenSearch. |
+| artifact-keeper custom `-patched` build pipeline | All patches are upstream in 1.2.0 — the stack now runs official ghcr images. |
+
+### Architecture & behavior changes
+
+- **Storage backend → S3 (Garage)** for artifact-keeper *and* the Korifi registry (was ephemeral `emptyDir`; dead `/data/storage` volume removed).
+- **Korifi builder push hardened** — Traefik `respondingTimeouts` raised so large kpack builder/image uploads aren't cut mid-stream.
+- **Image mirroring** uses an isolated `DOCKER_CONFIG` so `crane` never triggers the macOS Docker-Desktop credential-helper prompts.
+- **kappman global visibility** via the `cloudfoundry.org/propagate-cf-role` annotation (Korifi propagates its admin RoleBinding to all org/space namespaces, current and future).
+- **Configurable domains** — `DNS_ZONE` + platform/apps subdomain prefixes in `config.env` (defaults `sys` / `app`).
+
+> **Deferred:** the Spring Boot 4.x framework bump for the demo apps (petclinic) / kappman is intentionally held for a later upstream Spring release.
+
+---
+
 ## The platform in layers
 
 ```
