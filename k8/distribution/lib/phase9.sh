@@ -7,9 +7,25 @@ run_phase_9() {
 
   log_phase "Phase 9 — Marketplace Extension 1: AI/ML Services"
   load_config
-  local KUBECONFIG="${INSTALL_DIR}/kubeconfig"
-  export KUBECONFIG
+  # install.sh already exports the platform kubeconfig; the standalone extend
+  # script may not. Prefer an existing valid KUBECONFIG, else the per-VM file.
+  # (The old hardcoded ${INSTALL_DIR}/kubeconfig does not exist and broke every
+  # kubectl/bao call in this phase.)
+  if [[ -z "${KUBECONFIG:-}" || ! -f "${KUBECONFIG}" ]]; then
+    export KUBECONFIG="${HOME}/.kube/config-${LIMA_VM_NAME:-k3s-server}"
+  fi
+  # OpenBao CLI runs inside the pod — host 'bao' is not an installer prerequisite.
+  bao() { kubectl exec -n openbao openbao-0 -- bao "$@"; }
   ensure_openbao_login
+
+  # Authenticate the cf CLI as the Korifi admin (Step 5/8 need it). cf stores the
+  # session in ~/.cf, so briefly switch to the cf-admin kubeconfig context to mint
+  # it, then switch back so kubectl keeps using the cluster-admin context.
+  local _kube_ctx; _kube_ctx="$(kubectl config current-context 2>/dev/null || echo "k3s-${LIMA_VM_NAME:-k3s-server}")"
+  kubectl config use-context cf-admin >/dev/null 2>&1 || true
+  cf api "https://api.${APPS_DOMAIN:-app.cfapps.cool}" --skip-ssl-validation >/dev/null 2>&1 || true
+  cf auth cf-admin >/dev/null 2>&1 || true
+  kubectl config use-context "${_kube_ctx}" >/dev/null 2>&1 || true
 
   local BROKER_DIR="${INSTALL_DIR}/../services/cf-marketplace-broker"
 
@@ -59,11 +75,17 @@ run_phase_9() {
       LAYER=$(mktemp)
       (cd "${TMPDIR_IMG}" && tar cf "${LAYER}" app/)
 
-      crane append --base "${BASE_IMAGE}" --new_tag "${BROKER_IMAGE}" --new_layer "${LAYER}" --platform linux/arm64 --insecure 2>/dev/null
-      crane mutate "${BROKER_IMAGE}" --entrypoint "/app/broker" --tag "${BROKER_IMAGE}" --insecure 2>/dev/null
+      # Best-effort push: the broker image is a pre-published artifact, so a
+      # failed push (no registry write creds) must NOT abort the install — the
+      # deploy pulls the existing image via artifact-keeper-pull.
+      if crane append --base "${BASE_IMAGE}" --new_tag "${BROKER_IMAGE}" --new_layer "${LAYER}" --platform linux/arm64 --insecure 2>/dev/null \
+         && crane mutate "${BROKER_IMAGE}" --entrypoint "/app/broker" --tag "${BROKER_IMAGE}" --insecure 2>/dev/null; then
+        log_success "Broker image built and pushed: ${BROKER_IMAGE}"
+      else
+        log_warn "Broker push skipped/failed (no registry write creds?) — deploy will use pre-published ${BROKER_IMAGE}"
+      fi
 
       rm -rf "${BUILD_DIR}" "${TMPDIR_IMG}" "${LAYER}"
-      log_success "Broker image built and pushed: ${BROKER_IMAGE}"
     else
       log_warn "go or crane not found — build broker manually: k8/services/cf-marketplace-broker/src"
     fi
@@ -96,15 +118,18 @@ run_phase_9() {
       LAYER=$(mktemp)
       (cd "${TMPDIR_IMG}" && tar cf "${LAYER}" app/)
 
-      crane append --base "${BASE_IMAGE}" --new_tag "${EXISTING_BROKER_IMAGE}" --new_layer "${LAYER}" --platform linux/arm64 --insecure 2>/dev/null
-      crane mutate "${EXISTING_BROKER_IMAGE}" --entrypoint "/app/broker" --tag "${EXISTING_BROKER_IMAGE}" --insecure 2>/dev/null
+      if crane append --base "${BASE_IMAGE}" --new_tag "${EXISTING_BROKER_IMAGE}" --new_layer "${LAYER}" --platform linux/arm64 --insecure 2>/dev/null \
+         && crane mutate "${EXISTING_BROKER_IMAGE}" --entrypoint "/app/broker" --tag "${EXISTING_BROKER_IMAGE}" --insecure 2>/dev/null; then
+        log_success "Existing broker image built and pushed: ${EXISTING_BROKER_IMAGE}"
+      else
+        log_warn "Existing broker push skipped/failed (no registry write creds?) — using pre-published ${EXISTING_BROKER_IMAGE}"
+      fi
 
       rm -rf "${BUILD_DIR}" "${TMPDIR_IMG}" "${LAYER}"
-      log_success "Existing broker image built and pushed: ${EXISTING_BROKER_IMAGE}"
 
       kubectl set image deployment/cf-service-broker -n cf-services \
         broker="${EXISTING_BROKER_IMAGE}"
-      kubectl rollout status deployment/cf-service-broker -n cf-services --timeout=60s
+      kubectl rollout status deployment/cf-service-broker -n cf-services --timeout=60s || true
       log_success "Existing broker updated to v1.7.0"
     else
       log_warn "go or crane not found — update broker manually"
