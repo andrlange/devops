@@ -2802,6 +2802,12 @@ install_phase_8() {
     kubectl create rolebinding kappman-admin -n cf \
       --clusterrole=korifi-controllers-admin \
       --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
+    # Make kappman a true see-all platform admin: Korifi propagates any cf-root
+    # RoleBinding annotated 'cloudfoundry.org/propagate-cf-role=true' to EVERY org
+    # and space namespace — current AND future ones created later by anyone — so
+    # kappman sees all orgs/spaces/apps without per-namespace bindings.
+    kubectl annotate rolebinding kappman-admin -n cf \
+      cloudfoundry.org/propagate-cf-role=true --overwrite >/dev/null 2>&1 || true
     kubectl create rolebinding kappman-root-ns-user -n cf \
       --clusterrole=korifi-controllers-root-namespace-user \
       --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true

@@ -1185,22 +1185,29 @@ cmd_refresh_kappman() {
         return 1
     fi
 
+    # Primary mechanism: a cf-root admin RoleBinding annotated with
+    # cloudfoundry.org/propagate-cf-role=true. Korifi propagates it to EVERY org
+    # and space namespace automatically — current AND future — so kappman sees the
+    # whole platform without per-namespace bindings. This is what makes new orgs
+    # created via cf/cf-admin show up in kappman without re-running this command.
+    kubectl create rolebinding kappman-admin -n cf \
+        --clusterrole=korifi-controllers-admin \
+        --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
+    kubectl annotate rolebinding kappman-admin -n cf \
+        cloudfoundry.org/propagate-cf-role=true --overwrite >/dev/null
+    ok "Propagating admin RoleBinding ensured in 'cf' (Korifi syncs all orgs/spaces)"
+
+    # Immediate sync of existing org/space namespaces (don't wait for the
+    # propagation reconcile). The admin clusterrole alone grants full visibility.
     local count=0
     for ns in $(kubectl get ns -l korifi.cloudfoundry.org/org-guid -o name 2>/dev/null | sed 's|namespace/||') \
-              $(kubectl get ns -l korifi.cloudfoundry.org/space-guid -o name 2>/dev/null | sed 's|namespace/||') \
-              cf; do
+              $(kubectl get ns -l korifi.cloudfoundry.org/space-guid -o name 2>/dev/null | sed 's|namespace/||'); do
         kubectl create rolebinding kappman-admin -n "$ns" \
             --clusterrole=korifi-controllers-admin \
             --serviceaccount=korifi:kappman-cf-admin 2>/dev/null && count=$((count + 1)) || true
-        kubectl create rolebinding kappman-org-user -n "$ns" \
-            --clusterrole=korifi-controllers-organization-user \
-            --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
-        kubectl create rolebinding kappman-space-dev -n "$ns" \
-            --clusterrole=korifi-controllers-space-developer \
-            --serviceaccount=korifi:kappman-cf-admin 2>/dev/null || true
     done
 
-    ok "RoleBindings refreshed (${count} new namespaces added)"
+    ok "kappman RoleBindings refreshed (${count} namespaces synced now; future ones auto-propagate)"
     info "kappman can now see all orgs, spaces, and apps"
 }
 
