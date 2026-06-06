@@ -583,23 +583,30 @@ kubectl get externalsecrets -A -o json | jq -r '[.items[].status.conditions[-1].
 
 ### 3.1 Wave map
 
-| # | Wave | 🔴? | Gate | One-line exit criteria |
-|---|---|---|---|---|
-| 0 | Stabilize & checkpoint (pin the 4 floats to *current*) | | full backup | baseline green, rollback artifacts exist |
-| 1 | Image supply chain (mirror targets; fix ghcr.io/quay.io sources) | | — | every target image pullable from remote registry |
-| 2 | Host foundation (Lima 2.x, K3s→1.36.x pinned) | 🔴 | VM snapshot | pods reschedule, PVs intact, kpack builds |
-| 3 | Networking & TLS edge (cert-manager→MetalLB→Traefik 40) | | — | all IngressRoutes serve, certs valid |
-| 4 | **Secrets backbone (OpenBao → ESO v2)** | 🔴 | Runbook A | all ExternalSecrets Ready |
-| 5 | Storage & platform (Garage→ArgoCD→Portainer→Technitium 15→Velero) | | backup | S3 R/W ok, ArgoCD healthy, backups run |
-| 6 | Observability (KSM/NE/Alloy→Tempo→Loki/Grafana repo move→Mimir 3.1) | | bucket note | telemetry flowing, blocks migrated |
-| 7 | **artifact-keeper in-cluster → 1.2.0 (OpenSearch)** | 🔴 | Runbook B | search ok, docker-login ok |
-| 8 | GitLab CE 18.10→18.11.4→19.0.1 + Runner | | backup each hop | repos/CI green at each stop |
-| 9 | CF/Korifi (kpack 0.17.1, Contour/Envoy; Korifi unchanged) | | — | `cf push` builds+routes+TLS |
-| 10 | Brokers & operators (CNPG, RabbitMQ quay.io, Valkey, Go rebuild) | | — | `cf marketplace` full, bind works |
-| 11 | **Plane B alignment (otel/router/vault)** | 🔴(Mimir) | Runbook C | each remote stack healthy |
-| 12 | **Remote artifact-keeper → 1.2.0 (LAST)** | 🔴 | Runbook C | pulls/pushes + generic repo work |
-| 13 | Re-cut distribution (v1.1.2→v1.2.0) | | — | fresh install from new artifacts works |
-| 14 | ⏸ Spring apps (DEFERRED, after Spring release) | | — | apps build+run on new triple |
+_Status legend:_ ✅ done · 🔧 done + follow-up resolved · ⬜ not started · ⏸ deferred. Per-wave detail + commits in Chapter 4.
+
+| # | Wave | Status | 🔴? | Gate | One-line exit criteria |
+|---|---|---|---|---|---|
+| 0 | Stabilize & checkpoint (pin the 4 floats to *current*) | ✅ done (922be1f) | | full backup | baseline green, rollback artifacts exist |
+| 1 | Image supply chain (mirror targets; fix ghcr.io/quay.io sources) | ✅ done (67bb17d) | | — | every target image pullable from remote registry |
+| 2 | Host foundation (Lima 2.x, K3s→1.36.x pinned) | ✅ done (39a4a52) | 🔴 | VM snapshot | pods reschedule, PVs intact, kpack builds |
+| 3 | Networking & TLS edge (cert-manager→MetalLB→Traefik 40) | ✅ done (eb95e5e) | | — | all IngressRoutes serve, certs valid |
+| 4 | **Secrets backbone (OpenBao → ESO v2)** | ✅ done (6d3e453) | 🔴 | Runbook A | all ExternalSecrets Ready |
+| 5 | Storage & platform (Garage→ArgoCD→Portainer→Technitium 15→Velero) | ✅ done (474414e) | | backup | S3 R/W ok, ArgoCD healthy, backups run |
+| 6 | Observability (KSM/NE/Alloy→Tempo→Loki/Grafana repo move→Mimir 3.1) | ✅ done (01c9e1d) | | bucket note | telemetry flowing, blocks migrated |
+| 7 | **artifact-keeper in-cluster → 1.2.0 (OpenSearch)** | 🔧 done (08973d4) | 🔴 | Runbook B | search ok, docker-login ok |
+| 8 | GitLab CE 18.10→18.11.4→19.0.1 + Runner | ✅ done (4d474aa) | | backup each hop | repos/CI green at each stop |
+| 9 | CF/Korifi (kpack 0.17.1, Contour/Envoy; Korifi unchanged) | 🔧 done (dc118e6 + AK fix c993708/cccab7f; `cf push` verified) | | — | `cf push` builds+routes+TLS |
+| 10 | Brokers & operators (CNPG, RabbitMQ quay.io, Valkey, Go rebuild) | ⬜ not started | | — | `cf marketplace` full, bind works |
+| 11 | **Plane B alignment (otel/router/vault)** | ⬜ not started | 🔴(Mimir) | Runbook C | each remote stack healthy |
+| 12 | **Remote artifact-keeper → 1.2.0 (LAST)** | ⬜ not started | 🔴 | Runbook C | pulls/pushes + generic repo work |
+| 13 | Re-cut distribution (v1.1.2→v1.2.0) | ⬜ not started | | — | fresh install from new artifacts works |
+| 14 | ⏸ Spring apps (DEFERRED, after Spring release) | ⏸ deferred | | — | apps build+run on new triple |
+
+**Progress: Waves 0–9 complete (10/15 incl. deferred), CF data-plane verified via `cf push`. Next: Wave 10.**
+**Dated operational TODO:** after **2026-08-03** (korifi `korifi-api-internal-cert` self-signed renewal),
+`kubectl rollout restart deploy/korifi-api-deployment -n korifi` to clear the recurring `cf push`/`cf app` 500
+(stale-CA on the log-cache /stats path). See Wave 9 log + memory `project_korifi_api_selfsigned_cert_restart`.
 
 ### 3.2 Routine waves — checklists
 
@@ -836,7 +843,7 @@ after next week's Spring release.*
 | 4 — Secrets backbone (OpenBao → ESO) 🔴 | ✅ complete (OpenBao 2.5.4, ESO 2.5.0) | 2026-06-05 | 6d3e453 |
 | 5 — Storage & platform | ✅ complete (Garage, ArgoCD, Portainer, Technitium, Velero) | 2026-06-05 | _this commit_ |
 
-### Wave 0 — Stabilize & checkpoint
+### Wave 0 — Stabilize & checkpoint — ✅ DONE (922be1f)
 
 **Goal:** deterministic starting point — pin the 4 floating components to their *current running*
 versions, take full backups, and record a green health baseline before any version changes.
@@ -907,7 +914,7 @@ _Checklist:_
 - [x] Backups: OpenBao volume tar ✅ + reseed-map ✅ / Velero ❌ (Garage BSL down) / Lima snapshot ❌ (vz unsupported)
 - [x] Log committed + pushed
 
-### Wave 1 — Image supply chain
+### Wave 1 — Image supply chain — ✅ DONE (67bb17d)
 
 **Goal:** mirror all target `-arm64` images into the remote registry (`artifactory.cfapps.cool/docker-local`)
 so both the upgrade *and a clean install* can pull them; fix moved upstream sources.
@@ -939,7 +946,7 @@ _Checklist:_
 - [x] Mirrored 28 target images (verified pullable) — 0 failures
 - [x] Log committed + pushed
 
-### Wave 2 — Host foundation (Lima + K3s)
+### Wave 2 — Host foundation (Lima + K3s) — ✅ DONE (39a4a52)
 
 **Goal:** upgrade the substrate to the campaign target — K3s **1.34.5 → 1.36.1** — and ensure a fresh
 install lands there too.
@@ -966,7 +973,7 @@ _Checklist:_
 - [x] kpack/Korifi verified functional on 1.36
 - [x] Log committed + pushed
 
-### Wave 3 — Networking & TLS edge
+### Wave 3 — Networking & TLS edge — ✅ DONE (eb95e5e)
 
 **Goal:** upgrade the edge (cert-manager, MetalLB, Traefik) on both the live cluster and the install path.
 Mechanism per component: bump wrapper `Chart.yaml` (dep + appVersion) + `values.yaml` image tag →
@@ -1000,7 +1007,7 @@ _Checklist:_
 - [x] Vendored chart deps committed (install-path)
 - [x] Log committed + pushed
 
-### Wave 4 — Secrets backbone (OpenBao → ESO) 🔴
+### Wave 4 — Secrets backbone (OpenBao → ESO) 🔴 — ✅ DONE (6d3e453)
 
 **Goal:** OpenBao 0.8.0→0.28.3 / 2.5.1→2.5.4, then ESO 0.16.1→2.5.0 — the critical secret path. Order:
 store first, then sync. Pre-flight: Velero `wave4-pre` (Completed) + fresh ESO-CR export + OpenBao data tar.
@@ -1027,7 +1034,7 @@ _Checklist:_
 - [x] ESO → 2.5.0; ClusterSecretStore Valid, 48/48 SecretSynced
 - [x] Vendored chart deps committed; log committed + pushed
 
-### Wave 5 — Storage & platform
+### Wave 5 — Storage & platform — ✅ DONE (474414e)
 
 **Goal:** Garage → ArgoCD → Portainer → Technitium → Velero, on both live + install path. Pre-flight:
 Velero `wave5-pre` (resources) + `wave5-technitium` (PV fs-backup, major upgrade).
@@ -1059,7 +1066,7 @@ _Checklist:_
 - [x] Velero v1.18.1 + plugin v1.14.1 (vendored chart 12.0.2; test backup passed)
 - [x] Vendored chart deps committed; log committed + pushed
 
-### Wave 6 — Monitoring (LGTM)
+### Wave 6 — Monitoring (LGTM) — ✅ DONE (01c9e1d)
 
 **Goal:** KSM/node-exporter/Alloy → Tempo → Loki/Grafana (grafana-community repo move) → Mimir 3.1, on
 both live + install path. Pre-flight: Velero `wave6-monitoring` (monitoring,mimir) — Completed.
@@ -1114,7 +1121,7 @@ _Checklist:_
 - [x] Logging pipeline fixed (varlog mount, path regex, local.file_match, service DNS) — logs flow to Loki
 - [x] Vendored chart deps committed; log committed + pushed
 
-### Wave 7 — artifact-keeper (in-cluster) → 1.2.0 + OpenSearch 🔴
+### Wave 7 — artifact-keeper (in-cluster) → 1.2.0 + OpenSearch 🔴 — 🔧 DONE (08973d4; AK storage follow-up resolved in Wave 9)
 
 **Goal:** rc.8-patched → 1.2.0, Meilisearch → OpenSearch, on both live + install path. Pre-flight:
 Velero `wave7-ak` (Completed) + logical `pg_dump` (177K, 92 tables) to `/tmp/ak-pg-wave7.sql.gz`.
@@ -1169,7 +1176,7 @@ _Checklist:_
 - [x] Verified: health 200, web 200, search 200, S3 storage OK; install.sh + container-images.txt updated
 - [x] Committed + pushed
 
-### Wave 8 — GitLab CE 18.10 → 19.0.1 + Runner 🔴
+### Wave 8 — GitLab CE 18.10 → 19.0.1 + Runner 🔴 — ✅ DONE (4d474aa)
 
 **Goal:** GitLab CE `18.10.0 → 19.0.1` via required stops, Runner `18.10.0 → 19.0.1`, on both live +
 install path. Pre-flight: Velero `wave8-gitlab` (gitlab,gitlab-runner) — Completed (rollback point to 18.10.0).
@@ -1212,7 +1219,7 @@ _Checklist:_
 - [x] Verified 19.0.1 healthy, runner connected (binary 19.0.1); post-19.0 bg-migrations draining (0 failed)
 - [x] Traefik dashboard live route fixed to sys; committed + pushed
 
-### Wave 9 — CF/Korifi + kpack + Contour/Envoy
+### Wave 9 — CF/Korifi + kpack + Contour/Envoy — 🔧 DONE (dc118e6; AK fix c993708/cccab7f; cf push verified)
 
 **Goal:** kpack → 0.17.1, Contour → v1.33.5, Envoy → distroless-v1.35.10 (paired), Korifi unchanged
 (v0.18.0, already latest). Pre-flight: Velero `wave9-cf` (korifi,kpack,projectcontour,korifi-gateway).
@@ -1256,3 +1263,34 @@ _Checklist:_
       → re-pushed 6 buildpacks to correct tags (bash). kpack ClusterStack/Store/Builder all Ready; pipeline
       restored. (cf push may still hit the separate petclinic Paketo ca-certs issue.)
 - [x] Committed + pushed
+- [x] **cf push smoke test PASSED (2026-06-06):** Go app → kpack build → droplet to artifacts.sys (s3) →
+      pod 1/1 → Contour/Envoy route → `https://cf-smoke.app.cfapps.cool` HTTP 200. Build pipeline fully healthy.
+- [x] **Side-fix:** `cf push`/`cf app`/`cf logs` returned 500 on the log-cache /stats path
+      (`x509: unknown authority`) — korifi `korifi-api-internal-cert` is **self-signed** and renewed 2026-06-04;
+      korifi-api held a stale CA. `kubectl rollout restart deploy/korifi-api-deployment -n korifi` fixed it
+      (verified `cf app` shows live stats). **Recurs ~every 90d (next renewal 2026-08-03)** → restart again;
+      dated TODO in §3.1 + memory `project_korifi_api_selfsigned_cert_restart`.
+
+### Wave 10 — Brokers & operators — ⬜ NOT STARTED
+Planned: CloudNativePG (chart 0.28.2 / op 1.29.1), RabbitMQ cluster-operator → quay.io (op 2.21.0), Valkey,
+and rebuild the two Go brokers (cf-service-broker / cf-marketplace-broker: `go 1.26.4`, `k8s.io/* v0.36.1`,
+`-arm64`, mirror, bump deployment tags). Operator upgrades roll managed instances — verify each existing
+service instance survives. Exit: `cf marketplace` full + bind works. See §2.6 / Wave-10 plan note.
+
+### Wave 11 — Plane B alignment (otel / router / vault) 🔴 — ⬜ NOT STARTED
+Align the remote Docker-Compose stacks to in-cluster versions (Runbook C). otel/ Mimir 2.15→3.0 is MAJOR
+(blue/green); Grafana 11→12 (Angular); HAProxy/otel-collector audit. Can run in parallel with Plane A.
+
+### Wave 12 — Remote artifact-keeper → 1.2.0 (LAST) 🔴 — ⬜ NOT STARTED
+The pull source (artifactory.cfapps.cool). Reuse the 1.2.0-patched/official images; replace meilisearch with
+OpenSearch; reindex. Strictly last — while down, nothing can pull. Runbook C. **Apply the Wave 7/9 lesson:
+ensure the registry's storage backend is durable (not filesystem-on-ephemeral) so restarts don't drop manifests.**
+
+### Wave 13 — Re-cut distribution (v1.1.2 → v1.2.0) — ⬜ NOT STARTED
+`./build-distribution.sh`; rename installer-v1.2.0.sh / stack-v1.2.0.tgz; upload to remote generic repo; bump
+installer pre-flight Go check to 1.26.4; write UPGRADE-v1.2.0.md. Exit: fresh install from new artifacts works.
+
+### Wave 14 — Spring apps — ⏸ DEFERRED
+kappman + petclinic (Spring Boot 4.0.x / Java 25 / Paketo Java 21.4.0 locked triple), after next week's
+upstream Spring release. NOTE: petclinic cf push also blocked by Paketo ca-certificates scanning Korifi
+binding mounts (separate; see memory project_petclinic_cf_push).
