@@ -81,11 +81,6 @@ spec:
                 configMapKeyRef:
                   name: artifact-keeper-config
                   key: STORAGE_BACKEND
-            - name: S3_POOL_MAX_IDLE_PER_HOST
-              valueFrom:
-                configMapKeyRef:
-                  name: artifact-keeper-config
-                  key: S3_POOL_MAX_IDLE_PER_HOST
             - name: S3_ENDPOINT
               valueFrom:
                 configMapKeyRef:
