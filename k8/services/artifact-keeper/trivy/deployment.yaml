@@ -19,7 +19,7 @@ spec:
         - name: artifact-keeper-pull
       containers:
         - name: trivy
-          image: artifactory.cfapps.cool/docker-local/aquasecurity/trivy:0.69.3-arm64
+          image: artifactory.cfapps.cool/docker-local/aquasecurity/trivy:0.71.0-arm64
           args:
             - server
             - --listen
