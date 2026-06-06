@@ -598,12 +598,12 @@ _Status legend:_ ✅ done · 🔧 done + follow-up resolved · ⬜ not started �
 | 8 | GitLab CE 18.10→18.11.4→19.0.1 + Runner | ✅ done (4d474aa) | | backup each hop | repos/CI green at each stop |
 | 9 | CF/Korifi (kpack 0.17.1, Contour/Envoy; Korifi unchanged) | 🔧 done (dc118e6 + AK fix c993708/cccab7f; `cf push` verified) | | — | `cf push` builds+routes+TLS |
 | 10 | Brokers & operators (CNPG 1.29.1, RabbitMQ 2.21.0, Go rebuild) | ✅ done (`cf marketplace`+bind verified) | | — | `cf marketplace` full, bind works |
-| 11 | **Plane B — vault (OpenBao) + embedded LGTM** | 🔧 runbook ready | 🔴(Mimir) | `plans/planeb-remote-runbook.md` | remote session executes; vault+LGTM healthy |
-| 12 | **Plane B — artifact-keeper → 1.2.0 (LAST)** | 🔧 runbook ready | 🔴 | runbook Phase 3 | pull-source verified from Plane A |
+| 11 | **Plane B — vault (OpenBao) + embedded LGTM** | ✅ done (descoped) | — | — | vault is demo-only, OUTSIDE this platform → out of scope |
+| 12 | **Plane B — artifact-keeper → 1.2.0** | ✅ done | 🔴 | `plans/planeb-remote-runbook.md` | upgraded rc.8→1.2.0; pull-source verified from Plane A (46/46 + generic OK) |
 | 13 | Re-cut distribution (v1.1.2→v1.2.0) | ⬜ not started | | — | fresh install from new artifacts works |
 | 14 | ⏸ Spring apps (DEFERRED, after Spring release) | ⏸ deferred | | — | apps build+run on new triple |
 
-**Progress: Waves 0–10 complete (11/15 incl. deferred), CF data-plane verified via `cf push`; broker plane verified via `cf marketplace`+bind. Next: Wave 11.**
+**Progress: Waves 0–12 complete (Wave 11 vault descoped = demo-only/off-platform; Wave 12 artifact-keeper 1.2.0 done + consumer-verified). Next: Wave 13 (re-cut distribution v1.2.0). Wave 14 (Spring) deferred.**
 **Dated operational TODO:** after **2026-08-03** (korifi `korifi-api-internal-cert` self-signed renewal),
 `kubectl rollout restart deploy/korifi-api-deployment -n korifi` to clear the recurring `cf push`/`cf app` 500
 (stale-CA on the log-cache /stats path). See Wave 9 log + memory `project_korifi_api_selfsigned_cert_restart`.
@@ -1330,25 +1330,22 @@ postgresql/valkey/rabbitmq/s3 · `marketplace-broker`: postgres-ai/ai-connector/
 verified** via `cf create-service-key petclinic-db wave10-test` against the upgraded sb 1.5.0 + CNPG-1.29.1
 cluster `pg-f27a2d50` — full credentials returned (incl. `type` field); test key deleted.
 
-### Wave 11 — Plane B alignment 🔴 — 🔧 RUNBOOK READY (delegated to remote Claude session)
-**Scope corrected (user, 2026-06-06):** the remote Plane B server (`/home/deploy/`, user `deploy` + sudo) runs
-only **vault (OpenBao)** and **artifactory (artifact-keeper)** — there is **no** standalone `router/` or `otel/`
-stack; LGTM/mimir, if present, is **embedded** in those two folders' compose files. So Wave 11 (vault + embedded
-LGTM) and Wave 12 (artifact-keeper) are delivered together as one remote runbook.
-**Execution model:** I cannot steer a remote session directly (sessions are isolated). Authored a self-contained
-**`plans/planeb-remote-runbook.md`** for a **second Claude Code session on the server** to execute, with
-backup-first gates, per-phase `🚦 REPORT` checkpoints (human relays status back here), rollback, and verified
-target tags. vault target: openbao 2.5.4 / pg 18.4 / nginx 1.30.2-alpine / certbot v5.6.0 / collector 0.153.0;
-embedded LGTM aligned to Plane-A Wave-6 (mimir 3.1.0 blue/green, loki 3.7.2, tempo 2.10.5, grafana 12.4.3,
-AngularJS audit).
+### Wave 11 — Plane B vault (OpenBao) — ✅ DONE (DESCOPED, user 2026-06-06)
+**Out of scope for this platform.** The remote `vault/` (OpenBao) stack is **demo-only and lives OUTSIDE this
+platform** — it is not a dependency of Plane A and is not aligned as part of this campaign. Marked done/descoped.
+(The `plans/planeb-remote-runbook.md` retains the vault phase as reference if it is ever wanted, but it is not
+required here. The in-cluster OpenBao — the one Plane A actually uses — was already upgraded in Wave 4.)
 
-### Wave 12 — Remote artifact-keeper → 1.2.0 (LAST) 🔴 — 🔧 RUNBOOK READY (Phase 3 of the Plane B runbook)
-The pull source (artifactory.cfapps.cool). Folded into `plans/planeb-remote-runbook.md` **Phase 3** with the
-Wave-7 lessons baked in: **official** ghcr `…/artifact-keeper-{backend,web}:1.2.0` (drop rc.8-patched),
-meilisearch→**OpenSearch 2.19.5**, env contract (`OPENSEARCH_URL`, `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`,
-explicit `STORAGE_BACKEND` = whatever the server already uses — do NOT switch backends), the **rc.8→1.1.9→1.2.0
-migration hop** (null-decode bug), reindex, and a Plane-A pull test. Strictly last (maintenance window — while
-down nothing can pull); full DB+blob backup first; rollback to rc.8 kept ready.
+### Wave 12 — Remote artifact-keeper → 1.2.0 — ✅ DONE (2026-06-06)
+The pull source (artifactory.cfapps.cool) was upgraded **rc.8 → 1.2.0** (on-disk storage-layout migration
+`{repo}/oc/oci-* → {repo}/oci-*` + generic-repo layout fix; 61 orphaned tags pruned). **Consumer-side verified
+from Plane A:** all **46/46** referenced docker-local images resolve manifest **and** config blob, both generic
+artifacts (`installer-v1.1.2.sh`, `stack-v1.1.2.tgz`) download with valid integrity — **zero migration
+regressions**. One pre-existing break found+fixed (not migration-caused): `trivy/deployment.yaml` pinned the
+Wave-10-deleted `0.69.3-arm64` → bumped to `0.71.0-arm64` (commit 942d1b5). Runbook `plans/planeb-remote-runbook.md`
+Phase 3 documents the procedure (official ghcr 1.2.0, meili→OpenSearch 2.19.5, env contract, rc.8→1.1.9→1.2.0
+hop, reindex). **Registry note:** OCI manifest-DELETE is disabled; effective delete = admin-*user* (tokens can
+push + catalog-delist only); see memory `reference_ak_registry_delete_api`.
 
 ### Wave 13 — Re-cut distribution (v1.1.2 → v1.2.0) — ⬜ NOT STARTED
 `./build-distribution.sh`; rename installer-v1.2.0.sh / stack-v1.2.0.tgz; upload to remote generic repo; bump
