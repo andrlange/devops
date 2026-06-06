@@ -106,12 +106,7 @@ spec:
                 secretKeyRef:
                   name: garage-s3-credentials
                   key: S3_SECRET_KEY
-            # Storage paths
-            - name: STORAGE_PATH
-              valueFrom:
-                configMapKeyRef:
-                  name: artifact-keeper-config
-                  key: STORAGE_PATH
+            # Storage paths (blobs live in Garage S3; only the backup feature uses local disk)
             - name: BACKUP_PATH
               valueFrom:
                 configMapKeyRef:
@@ -121,8 +116,6 @@ spec:
             - secretRef:
                 name: artifact-keeper-credentials
           volumeMounts:
-            - name: storage
-              mountPath: /data/storage
             - name: backups
               mountPath: /data/backups
           resources:
@@ -148,7 +141,5 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 5
       volumes:
-        - name: storage
-          emptyDir: {}
         - name: backups
           emptyDir: {}

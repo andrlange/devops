@@ -20,6 +20,5 @@ data:
   TRIVY_URL: http://trivy:8090
   SCAN_WORKSPACE_PATH: /scan-workspace
 
-  # Storage paths
-  STORAGE_PATH: /data/storage
+  # Storage paths (blobs live in Garage S3; only the backup feature uses local disk)
   BACKUP_PATH: /data/backups
