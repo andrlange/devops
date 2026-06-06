@@ -1364,9 +1364,22 @@ only — generic-repo upload returns `FORBIDDEN: Token does not have required sc
 `tmp` user (still present — **remove when done**).
 
 **Fresh-install verified:** downloaded both via the public `…/generic/download/` endpoint — the published
-installer's `EXPECTED_CHECKSUM` (`29b7059b…`) exactly matches the published `stack.tgz` sha256, so the
-installer's integrity gate passes against the published tarball. Go check reads `1.26.4`. Wrote
-`UPGRADE-v1.2.0.md` (fresh-install one-liner + extend-existing path + what's-new).
+installer's `EXPECTED_CHECKSUM` exactly matches the published `stack.tgz` sha256, so the installer's integrity
+gate passes against the published tarball. Go check reads `1.26.4`. Wrote `UPGRADE-v1.2.0.md` (fresh-install
+one-liner + extend-existing path + what's-new).
+
+**Republished v1.2.0 (2026-06-06, commit `7aa60d5` included):** after the initial publish, one more install-path
+fix landed — `fix(artifact-keeper): drop dead emptyDir /data/storage` (blobs live in Garage S3; the leftover
+ephemeral volume misleadingly looked durable and was wiped on pod restart, the root cause behind the lost
+korifi app packages/droplets — see memory `project_incluster_ak_registry_bug`). The first-published tarball
+(sha `29b7059b…`) was stale by exactly that one commit, so rebuilt and **overwrote** v1.2.0 → new sha
+`d6b43124…`. Generic-repo artifacts are **immutable** (`POST` of an existing path returns 409
+`CONFLICT: Artifact version already exists and is immutable`), so overwrite = `DELETE
+/api/v1/repositories/generic/artifacts/{installer-v1.2.0.sh,stack-v1.2.0.tgz}` (admin user) then re-`POST`.
+Re-verified: both download HTTP 200, installer `EXPECTED_CHECKSUM` == published stack sha `d6b43124…`, tarball
+has 0 `/data/storage` refs. Published artifacts now exactly match repo HEAD. The temporary `tmp` admin user was
+**deleted by the user afterward** — note generic-repo writes/deletes need an admin user (dev `AK_TOKEN` is
+docker-push scope only), so a future republish must create a fresh temp admin first.
 
 ### Wave 14 — Spring apps — ⏸ DEFERRED
 kappman + petclinic (Spring Boot 4.0.x / Java 25 / Paketo Java 21.4.0 locked triple), after next week's
