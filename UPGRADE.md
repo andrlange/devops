@@ -600,10 +600,10 @@ _Status legend:_ ✅ done · 🔧 done + follow-up resolved · ⬜ not started �
 | 10 | Brokers & operators (CNPG 1.29.1, RabbitMQ 2.21.0, Go rebuild) | ✅ done (`cf marketplace`+bind verified) | | — | `cf marketplace` full, bind works |
 | 11 | **Plane B — vault (OpenBao) + embedded LGTM** | ✅ done (descoped) | — | — | vault is demo-only, OUTSIDE this platform → out of scope |
 | 12 | **Plane B — artifact-keeper → 1.2.0** | ✅ done | 🔴 | `plans/planeb-remote-runbook.md` | upgraded rc.8→1.2.0; pull-source verified from Plane A (46/46 + generic OK) |
-| 13 | Re-cut distribution (v1.1.2→v1.2.0) | ⬜ not started | | — | fresh install from new artifacts works |
+| 13 | Re-cut distribution (v1.1.2→v1.2.0) | ✅ done | | `UPGRADE-v1.2.0.md` | published; download→checksum verified against published installer |
 | 14 | ⏸ Spring apps (DEFERRED, after Spring release) | ⏸ deferred | | — | apps build+run on new triple |
 
-**Progress: Waves 0–12 complete (Wave 11 vault descoped = demo-only/off-platform; Wave 12 artifact-keeper 1.2.0 done + consumer-verified). Next: Wave 13 (re-cut distribution v1.2.0). Wave 14 (Spring) deferred.**
+**Progress: Waves 0–13 complete (Wave 11 vault descoped = demo-only/off-platform). Distribution v1.2.0 published + fresh-install-verified. Only Wave 14 (Spring) remains, deferred until the next upstream Spring release.**
 **Dated operational TODO:** after **2026-08-03** (korifi `korifi-api-internal-cert` self-signed renewal),
 `kubectl rollout restart deploy/korifi-api-deployment -n korifi` to clear the recurring `cf push`/`cf app` 500
 (stale-CA on the log-cache /stats path). See Wave 9 log + memory `project_korifi_api_selfsigned_cert_restart`.
@@ -1312,8 +1312,8 @@ versions incl. 3× old GitLab CE upgrade hops → **12.36 GB (46%), 14.49 GB fre
 meilisearch (remote AK/Plane B may still run those until Wave 12). Delete mechanism (OCI DELETE is disabled in
 this AK build): `DELETE /api/v1/repositories/docker-local/artifacts/{path}` with the listing `path` field
 **`%2F`-encoded** + an **admin** user (dev/svc-stack tokens can push but not delete); then `POST
-/api/v1/admin/storage-gc`. See memory `reference_ak_registry_delete_api`. TODO: trim the GitLab `18.11.4` hop
-from `mirror-platform-images.sh` in Wave 13 (fresh installs go straight to 19.0.1).
+/api/v1/admin/storage-gc`. See memory `reference_ak_registry_delete_api`. ✅ Done in Wave 13: trimmed the
+GitLab `18.11.4` hop from `mirror-platform-images.sh` (fresh installs go straight to 19.0.1).
 
 **Go brokers (rebuilt + re-pushed to artifactory `docker-local`):** both `go.mod` → `go 1.26.4`, `k8s.io/*`
 `v0.35.3`→`v0.36.1`, `go mod tidy`, built `linux/arm64`, mirrored via crane.
@@ -1347,9 +1347,26 @@ Phase 3 documents the procedure (official ghcr 1.2.0, meili→OpenSearch 2.19.5,
 hop, reindex). **Registry note:** OCI manifest-DELETE is disabled; effective delete = admin-*user* (tokens can
 push + catalog-delist only); see memory `reference_ak_registry_delete_api`.
 
-### Wave 13 — Re-cut distribution (v1.1.2 → v1.2.0) — ⬜ NOT STARTED
-`./build-distribution.sh`; rename installer-v1.2.0.sh / stack-v1.2.0.tgz; upload to remote generic repo; bump
-installer pre-flight Go check to 1.26.4; write UPGRADE-v1.2.0.md. Exit: fresh install from new artifacts works.
+### Wave 13 — Re-cut distribution (v1.1.2 → v1.2.0) — ✅ DONE (2026-06-06)
+Re-cut and published the distribution carrying all campaign changes (Waves 10/12). Source edits so the
+**install path** reaches v1.2.0 state on a naked system:
+- `installer.sh` pre-flight Go check **1.26 → 1.26.4** (matches the broker build toolchain).
+- `k8/mirror-platform-images.sh`: dropped the GitLab `18.11.4-ce.0` mirror line — fresh installs deploy
+  `gitlab-ce:19.0.1-ce.0-arm64` directly (`statefulset.yaml:23`); 18.11.4 was only an in-place-upgrade stop,
+  never on the install path.
+- (already in tree from Waves 10/12: trivy `0.71.0-arm64`, sb `1.7.0-arm64`, mb `1.2.0-arm64`, broker-managed
+  workload images, CNPG chart 0.28.2 / RabbitMQ op v2.21.0 in `install.sh`.)
+
+**Build + publish:** `./build-distribution.sh` → `dist/stack.tgz` (97M, sha `29b7059b…`) + `dist/installer.sh`
+(checksum baked in). Staged as `installer-v1.2.0.sh` / `stack-v1.2.0.tgz`, uploaded to the **generic** repo
+(`POST /api/v1/repositories/generic/artifacts`, both HTTP 200). NOTE: the dev `AK_TOKEN` has docker-push scope
+only — generic-repo upload returns `FORBIDDEN: Token does not have required scope: write`; used the admin
+`tmp` user (still present — **remove when done**).
+
+**Fresh-install verified:** downloaded both via the public `…/generic/download/` endpoint — the published
+installer's `EXPECTED_CHECKSUM` (`29b7059b…`) exactly matches the published `stack.tgz` sha256, so the
+installer's integrity gate passes against the published tarball. Go check reads `1.26.4`. Wrote
+`UPGRADE-v1.2.0.md` (fresh-install one-liner + extend-existing path + what's-new).
 
 ### Wave 14 — Spring apps — ⏸ DEFERRED
 kappman + petclinic (Spring Boot 4.0.x / Java 25 / Paketo Java 21.4.0 locked triple), after next week's

@@ -64,8 +64,7 @@ quay.io/prometheus/node-exporter|v1.11.1|quay.io/prometheus/node-exporter
 aquasecurity/trivy|0.71.0|ghcr.io/aquasecurity/trivy docker.io/aquasec/trivy
 postgres|17.10|docker.io/library/postgres
 opensearchproject/opensearch|2.19.5|docker.io/opensearchproject/opensearch
-# --- Wave 8 gitlab (CE must pass required stop 18.11.4 -> 19.0.1) ---
-gitlab/gitlab-ce|18.11.4-ce.0|docker.io/gitlab/gitlab-ce
+# --- Wave 8 gitlab (fresh installs deploy 19.0.1 directly; the 18.11.4 in-place-upgrade stop is not on the install path) ---
 gitlab/gitlab-ce|19.0.1-ce.0|docker.io/gitlab/gitlab-ce
 gitlab-org/gitlab-runner|alpine-v19.0.1|docker.io/gitlab/gitlab-runner registry.gitlab.com/gitlab-org/gitlab-runner
 # --- Wave 10 broker-managed workload images (provisioned on demand by cf-service-broker) ---

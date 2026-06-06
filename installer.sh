@@ -248,7 +248,7 @@ check_host_tools() {
     "skopeo:skopeo:skopeo:"
     "crane:crane:crane:"
     "CF CLI:cf:cloudfoundry/tap/cf-cli@8:8"
-    "Go:go:go:1.26"
+    "Go:go:go:1.26.4"
   )
 
   local optional_tools=(
