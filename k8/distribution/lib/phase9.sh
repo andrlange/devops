@@ -224,19 +224,19 @@ run_phase_9() {
 
   # --- Step 7: Update credentials doc ---
   if ! component_is_installed "phase9_docs" "$STATE_FILE"; then
-    log_step "Writing marketplace broker credentials"
+    log_step "Updating stack credentials.md (marketplace broker)"
 
-    local BROKER_PASSWORD
-    BROKER_PASSWORD=$(kubectl get secret marketplace-broker-openbao-token -n cf-services -o jsonpath='{.data.token}' | base64 -d)
-
-    cat >> "${INSTALL_DIR}/credentials.md" <<CREDS
-
-## Marketplace Broker (Phase 9)
-- **Broker URL:** http://cf-marketplace-broker.cf-services.svc.cluster.local
-- **Username:** marketplace-broker
-- **Password:** ${BROKER_PASSWORD}
-- **Services:** postgres-ai, openbao-secrets, ai-connector
-CREDS
+    # Regenerate the ONE unified credentials.md owned by write_credentials
+    # (${K8_DIR}/../credentials.md, full overwrite). It now includes the
+    # marketplace-broker row read from the cf-services secret. The old code
+    # appended to ${INSTALL_DIR}/credentials.md — a DIFFERENT file — so the
+    # Phase 9 creds ended up split from phases 1-8.
+    if declare -f write_credentials >/dev/null 2>&1; then
+      write_credentials
+      log_success "credentials.md updated (unified, includes marketplace broker)"
+    else
+      log_warn "write_credentials not available (standalone run) — broker password is in the cf-services secret 'marketplace-broker-openbao-token'"
+    fi
 
     mark_component_installed "phase9_docs" "$STATE_FILE"
   fi

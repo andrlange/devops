@@ -85,6 +85,8 @@ write_credentials() {
     # Velero
     local velero_ak="$(_bao_field access_key secret/garage/velero)"
     local velero_sk="$(_bao_field secret_key secret/garage/velero)"
+    # Marketplace broker (Phase 9, optional) — K8s Secret in cf-services
+    local mb_pw="$(kubectl get secret marketplace-broker-openbao-token -n cf-services -o jsonpath='{.data.token}' 2>/dev/null | base64 -d 2>/dev/null)"
 
     # Compute GitLab SSH IP from MetalLB range (first IP + 2)
     local metallb_first="${METALLB_IP_RANGE%%-*}"
@@ -152,6 +154,9 @@ Apps Domain: ${apps_domain}
 |---------|-----|----------|---------|
 | CF API | https://api.${apps_domain} | cf-admin | Token via \`cf auth cf-admin\` |
 | kappman | https://kappman.${apps_domain} | admin | Default: \`change_me\` |
+| Marketplace Broker (Phase 9) | http://cf-marketplace-broker.cf-services.svc.cluster.local | marketplace-broker | \`${mb_pw:-not yet set (Phase 9)}\` |
+
+> Marketplace broker services: postgres-ai, openbao-secrets, ai-connector
 
 ## Useful Commands
 
