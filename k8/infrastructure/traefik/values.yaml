@@ -38,3 +38,12 @@ traefik:
     - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
     - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
     - "--entrypoints.websecure.http.tls"
+    # Large OCI blob uploads (e.g. kpack pushing the Korifi builder to
+    # artifact-keeper) stream for minutes. Traefik v3 defaults
+    # respondingTimeouts.readTimeout to 60s, which cuts the streamed
+    # PATCH mid-upload — the backend then 400s and Traefik returns 502,
+    # so the kpack ClusterBuilder never gets a latestImage. Raise the
+    # request read/write/idle timeouts so big pushes complete.
+    - "--entrypoints.websecure.transport.respondingTimeouts.readTimeout=900s"
+    - "--entrypoints.websecure.transport.respondingTimeouts.writeTimeout=900s"
+    - "--entrypoints.websecure.transport.respondingTimeouts.idleTimeout=900s"
