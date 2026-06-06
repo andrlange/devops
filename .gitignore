@@ -23,6 +23,11 @@ CLAUDE.md
 .superpowers/
 
 # Standalone remote-server stacks — kept in their own repos, not in this one
+# /artifactory/ also holds a LOCAL-ONLY clone of the upstream artifact-keeper
+# source (artifactory/source/, github.com/artifact-keeper/artifact-keeper). The
+# stack runs the OFFICIAL artifact-keeper 1.2.0 images — no custom patches — so
+# this clone is reference/PR-dev only and is never built into or shipped with the
+# stack. Do not commit or push it from this repo.
 /artifactory/
 /otel/
 /router/
