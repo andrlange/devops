@@ -1211,3 +1211,47 @@ _Checklist:_
 - [x] Stored runner helm-release patched v1beta1→v1 (Wave 6 pattern)
 - [x] Verified 19.0.1 healthy, runner connected (binary 19.0.1); post-19.0 bg-migrations draining (0 failed)
 - [x] Traefik dashboard live route fixed to sys; committed + pushed
+
+### Wave 9 — CF/Korifi + kpack + Contour/Envoy
+
+**Goal:** kpack → 0.17.1, Contour → v1.33.5, Envoy → distroless-v1.35.10 (paired), Korifi unchanged
+(v0.18.0, already latest). Pre-flight: Velero `wave9-cf` (korifi,kpack,projectcontour,korifi-gateway).
+
+**kpack 0.17.0 → 0.17.1 — self-built native arm64 (plan note was wrong).** Upstream kpack 0.17.1 ghcr
+images are **amd64-only** (no arm64, no `-arm64` tags) — confirmed via `crane config` (arch=amd64). So the
+plan's "from ghcr.io, no self-build" does NOT hold for arm64; we must self-build (as 0.17.0 was). Bumped
+`k8/services/kpack/build-arm64.sh` to 0.17.1 + made it bash-3.2-safe (replaced `declare -A` with a `case`
+function), re-cloned src@v0.17.1, native `GOARCH=arm64` compiled the 6 binaries + crane-pushed to
+`docker-local/kpack/*:0.17.1-arm64` (verified arch=arm64), then `kubectl set image` + `set env`
+(BUILD_INIT/WAITER/REBASE/COMPLETION). Controller/webhook on 0.17.1 (commit 43e0081), no emulation.
+install.sh: kpack v0.17.1 release URL + KPACK_TAG.
+
+**Contour v1.33.3 → v1.33.5 / Envoy distroless-v1.35.9 → v1.35.10 (paired).** Deployed from upstream
+quickstart (ghcr.io/docker.io direct). `kubectl set image` on `deploy/contour` (contour) + `ds/envoy`
+(shutdown-manager, envoy-initconfig → contour v1.33.5; envoy → distroless-v1.35.10). Pods healthy,
+CF API route `api.app/v3` 200, no contour errors. install.sh: pinned quickstart to
+`raw.githubusercontent.com/projectcontour/contour/v1.33.5/examples/render/contour.yaml` (was "latest";
+now reproducible) + pre-pull refs v1.33.5/v1.35.10; mirrored both to the registry (`-arm64`).
+
+**🔴 DISCOVERED — Wave 7 regression, tracked as follow-up (user decision: finish Contour/Envoy, fix AK
+separately).** The kpack restart forced a fresh image re-resolution, exposing that the **in-cluster
+artifact-keeper 1.2.0 OCI registry serves manifests unreliably**: backend logs `"oci_tags row found but
+storage file missing"` and images **flap** (java/stacks 0/5, then java 3/3, then 0/5 again; 6 buildpacks
+stable 5/5). The old kpack controller had masked this with cached digests. Authorized repair (clear stale
+`:latest` tag + re-push fresh — AK 1.2.0 does NOT update an existing tag on re-push) **fixed 6/7
+buildpacks** but does NOT converge for java + the 2 jammy stacks (manifest PUT → 201 but content doesn't
+reliably serve back). Root cause is an AK 1.2.0 storage read-path/consistency bug, NOT kpack. **No working
+functionality regressed** — cf push was already blocked (petclinic Paketo ca-certs) and the old "ready"
+ClusterBuilder was cosmetic (builds would have failed on stack pull anyway). Rollback to rc.8 is hard (DB
+migrated to v113). **kpack ClusterStore/Builder remain not-ready until the AK registry is fixed** — see
+follow-up below.
+
+_Checklist:_
+- [x] kpack 0.17.1 self-built **native arm64** (upstream is amd64-only) + deployed; build-arm64.sh + install.sh updated
+- [x] Contour v1.33.5 + Envoy distroless-v1.35.10 (paired); CF API route 200; quickstart pinned + mirrored
+- [x] Korifi unchanged (v0.18.0 latest)
+- [ ] **FOLLOW-UP: in-cluster artifact-keeper 1.2.0 OCI manifest serving is unreliable** → kpack
+      ClusterStore/Builder not-ready → CF builds blocked. Needs a dedicated fix (investigate AK 1.2.0
+      manifest read path / Garage consistency, or restore wave7-ak / await an AK release). 6/7 buildpacks
+      already re-pushed; java + jammy stacks still flap. cf push smoke test deferred until resolved.
+- [x] Committed + pushed

@@ -2000,20 +2000,20 @@ install_phase_6() {
     # Pre-pull Contour/Envoy images from artifact-keeper and re-tag to match quickstart expectations
     log_info "Pre-pulling Contour images..."
     limactl shell "${LIMA_VM_NAME}" sudo crictl pull --creds "${REGISTRY_USER}:${REGISTRY_PASS}" \
-      "${CONTOUR_REGISTRY}/projectcontour/contour:v1.33.2-arm64" 2>/dev/null || true
+      "${CONTOUR_REGISTRY}/projectcontour/contour:v1.33.5-arm64" 2>/dev/null || true
     limactl shell "${LIMA_VM_NAME}" sudo crictl pull --creds "${REGISTRY_USER}:${REGISTRY_PASS}" \
-      "${CONTOUR_REGISTRY}/envoyproxy/envoy:distroless-v1.35.9-arm64" 2>/dev/null || true
+      "${CONTOUR_REGISTRY}/envoyproxy/envoy:distroless-v1.35.10-arm64" 2>/dev/null || true
     limactl shell "${LIMA_VM_NAME}" sudo ctr -n k8s.io images tag \
-      "${CONTOUR_REGISTRY}/projectcontour/contour:v1.33.2-arm64" \
-      "ghcr.io/projectcontour/contour:v1.33.2" 2>/dev/null || true
+      "${CONTOUR_REGISTRY}/projectcontour/contour:v1.33.5-arm64" \
+      "ghcr.io/projectcontour/contour:v1.33.5" 2>/dev/null || true
     limactl shell "${LIMA_VM_NAME}" sudo ctr -n k8s.io images tag \
-      "${CONTOUR_REGISTRY}/envoyproxy/envoy:distroless-v1.35.9-arm64" \
-      "docker.io/envoyproxy/envoy:distroless-v1.35.9" 2>/dev/null || true
+      "${CONTOUR_REGISTRY}/envoyproxy/envoy:distroless-v1.35.10-arm64" \
+      "docker.io/envoyproxy/envoy:distroless-v1.35.10" 2>/dev/null || true
 
     # Install Contour full quickstart (Deployment + DaemonSet + ConfigMap)
     # backendtlspolicies CRD was already handled in the Gateway API CRDs step
     kubectl apply --server-side --force-conflicts \
-      -f https://projectcontour.io/quickstart/contour.yaml 2>&1 | tail -5
+      -f https://raw.githubusercontent.com/projectcontour/contour/v1.33.5/examples/render/contour.yaml 2>&1 | tail -5
 
     # Create GatewayClass (required for Contour to process Gateway objects)
     kubectl apply -f - <<GCEOF
@@ -2044,13 +2044,13 @@ GCEOF
 
   # --- Install kpack ---
   if ! component_is_installed "phase6_kpack" "$STATE_FILE"; then
-    log_step "Installing kpack v0.17.0..."
+    log_step "Installing kpack v0.17.1..."
     # Apply twice: first pass creates CRDs, second pass creates resources that depend on them
     kubectl apply --server-side --force-conflicts \
-      -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.0/release-0.17.0.yaml 2>/dev/null || true
+      -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.1/release-0.17.1.yaml 2>/dev/null || true
     sleep 5
     kubectl apply --server-side --force-conflicts \
-      -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.0/release-0.17.0.yaml 2>&1 | tail -3
+      -f https://github.com/buildpacks-community/kpack/releases/download/v0.17.1/release-0.17.1.yaml 2>&1 | tail -3
     wait_for_pods "kpack" 120
     log_success "kpack installed"
     mark_component_installed "phase6_kpack" "$STATE_FILE"
@@ -2059,7 +2059,7 @@ GCEOF
   # --- Patch kpack with ARM64 images ---
   if ! component_is_installed "phase6_kpack_arm64" "$STATE_FILE"; then
     log_step "Patching kpack with ARM64 images (native, no QEMU)..."
-    local KPACK_TAG="0.17.0-arm64"
+    local KPACK_TAG="0.17.1-arm64"
     local KPACK_REGISTRY="${REGISTRY:-artifactory.cfapps.cool}/docker-local"
 
     # Check if ARM64 images exist in registry

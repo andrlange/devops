@@ -14,7 +14,7 @@ set -euo pipefail
 
 REGISTRY="${REGISTRY:-artifactory.cfapps.cool/docker-local}"
 REGISTRY_USER="${REGISTRY_USER:-admin}"
-VERSION="0.17.0"
+VERSION="0.17.1"
 TAG="${VERSION}-arm64"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC_DIR="${SCRIPT_DIR}/src"
@@ -52,18 +52,21 @@ echo ""
 
 # Step 2: Build OCI images with crane and push
 # controller/webhook use /app, build helpers use /cnb/process/<name>
-declare -A BINARY_PATHS
-BINARY_PATHS[controller]="/app"
-BINARY_PATHS[webhook]="/app"
-BINARY_PATHS[build-init]="/cnb/process/build-init"
-BINARY_PATHS[build-waiter]="/cnb/process/build-waiter"
-BINARY_PATHS[rebase]="/cnb/process/rebase"
-BINARY_PATHS[completion]="/cnb/process/completion"
+# (bash 3.2 compatible — macOS ships no `declare -A`)
+binary_path() {
+  case "$1" in
+    controller|webhook) echo "/app" ;;
+    build-init)         echo "/cnb/process/build-init" ;;
+    build-waiter)       echo "/cnb/process/build-waiter" ;;
+    rebase)             echo "/cnb/process/rebase" ;;
+    completion)         echo "/cnb/process/completion" ;;
+  esac
+}
 
 echo "--- Building and pushing OCI images ---"
 for binary in "${BINARIES[@]}"; do
   IMAGE="${REGISTRY}/kpack/${binary}:${TAG}"
-  TARGET="${BINARY_PATHS[$binary]}"
+  TARGET="$(binary_path "$binary")"
   echo -n "  ${binary} -> ${IMAGE} (${TARGET})... "
 
   # Create layer tarball with binary at expected path
