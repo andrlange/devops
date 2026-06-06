@@ -1283,9 +1283,18 @@ existing pattern, no artifactory mirror needed):**
   image "moves to quay.io" — it does **not**; v2.21.0 manifest still uses `ghcr.io/rabbitmq/cluster-operator:2.21.0`
   (multi-arch). §2.6 note was wrong; image source unchanged.
 
+**RabbitMQ server pinned to 4.3.1** (separate follow-up, broker `1.6.0`): operator 2.21.0 defaults the
+managed RabbitMQ server image to **4.2.6-management** (compiled-in default, pulled direct from Docker Hub —
+no `DEFAULT_RABBITMQ_IMAGE` env in the manifest). The operator does not version-gate, so pinned
+`spec.image: rabbitmq:4.3.1-management` in the broker provisioner (`provisioners/rabbitmq.go`). 4.3.1-management
+is a multi-arch index incl. `linux/arm64`, pulled direct from Docker Hub — matches the operator's own default
+and the CNPG PG-server upstream-pull pattern (no artifactory mirror). **Verified:** `cf create-service rabbitmq`
+→ operator stamps `rabbitmq:4.3.1-management`, pod AllReplicasReady, `rabbitmqctl version` = **4.3.1**, bind
+returns full amqp creds; test instance deleted.
+
 **Go brokers (rebuilt + re-pushed to artifactory `docker-local`):** both `go.mod` → `go 1.26.4`, `k8s.io/*`
 `v0.35.3`→`v0.36.1`, `go mod tidy`, built `linux/arm64`, mirrored via crane.
-- `cf-service-broker` `1.4.0`→**`1.5.0-arm64`** (digest `b5bc2315`)
+- `cf-service-broker` `1.4.0`→`1.5.0`→**`1.6.0-arm64`** (1.6.0 adds the RabbitMQ 4.3.1 pin)
 - `cf-marketplace-broker` (live `1.1.0`, source-drifted at `1.0.0`) →**`1.2.0-arm64`** (digest `b5c85a20`)
 - Source reconciled: `deployment.yaml` (both), `lib/phase9.sh` (both build steps 1.0.0→1.2.0 / 1.4.0→1.5.0),
   `install.sh` phase7 build tag (stale `1.3.1`→`1.5.0` to match deployment.yaml — was a latent fresh-install
