@@ -1,0 +1,120 @@
+diff --git a/backend/src/api/handlers/oci_v2.rs b/backend/src/api/handlers/oci_v2.rs
+index 86b3e02..dc062a6 100644
+--- a/backend/src/api/handlers/oci_v2.rs
++++ b/backend/src/api/handlers/oci_v2.rs
+@@ -2500,11 +2500,77 @@ async fn handle_get_blob(
+     oci_error(StatusCode::NOT_FOUND, "BLOB_UNKNOWN", "blob not found")
+ }
+ 
++/// Attempt to satisfy an OCI cross-repository blob mount
++/// (`POST /v2/<name>/blobs/uploads/?mount=<digest>&from=<repo>`).
++///
++/// Blob storage is content-addressed (`blob_storage_key` = `oci-blobs/<digest>`),
++/// so a blob already held by *any* repository is byte-identical and is linked
++/// into the target repo with a single `oci_blobs` row — no bytes are copied.
++/// Returns `Some(201 Created)` on success, or `None` to fall back to a normal
++/// upload session when the blob is not held (exactly what the OCI
++/// distribution spec requires for an unsatisfiable mount).
++///
++/// Why it matters: kpack assembles the Korifi builder by mounting the
++/// lifecycle/stack layers it has already pushed. Without mount support the
++/// registry forces a multi-hundred-MB re-upload through the ingress on every
++/// builder rebuild — slow, and prone to proxy read-timeouts.
++async fn try_mount_blob(
++    state: &SharedState,
++    target: &OciRepoInfo,
++    image_name: &str,
++    digest: &str,
++) -> Option<Response> {
++    // Locate the blob in any repository (content-addressed storage is shared).
++    let existing = match sqlx::query!(
++        "SELECT size_bytes, storage_key FROM oci_blobs WHERE digest = $1 LIMIT 1",
++        digest
++    )
++    .fetch_optional(&state.db)
++    .await
++    {
++        Ok(Some(row)) => row,
++        _ => return None,
++    };
++
++    // Never advertise a mount for a dangling DB row: confirm the backing
++    // object is actually present in this repo's storage backend first.
++    let storage = state.storage_for_repo(&target.location).ok()?;
++    if !storage.exists(&existing.storage_key).await.unwrap_or(false) {
++        return None;
++    }
++
++    // Link the blob into the target repository (idempotent).
++    if sqlx::query!(
++        "INSERT INTO oci_blobs (repository_id, digest, size_bytes, storage_key) VALUES ($1, $2, $3, $4) ON CONFLICT (repository_id, digest) DO NOTHING",
++        target.id,
++        digest,
++        existing.size_bytes,
++        existing.storage_key
++    )
++    .execute(&state.db)
++    .await
++    .is_err()
++    {
++        return None;
++    }
++
++    Some(
++        Response::builder()
++            .status(StatusCode::CREATED)
++            .header(LOCATION, format!("/v2/{}/blobs/{}", image_name, digest))
++            .header("Docker-Content-Digest", digest)
++            .header(CONTENT_LENGTH, "0")
++            .body(Body::empty())
++            .unwrap(),
++    )
++}
++
+ async fn handle_start_upload(
+     state: &SharedState,
+     headers: &HeaderMap,
+     image_name: &str,
+     query_digest: Option<&str>,
++    mount: Option<&str>,
+     body: Body,
+ ) -> Response {
+     let host = request_host(headers);
+@@ -2525,6 +2591,16 @@ async fn handle_start_upload(
+         Err(e) => return e,
+     };
+     let repo_id = repo.id;
++
++    // OCI cross-repository blob mount: if the client asked to mount a blob we
++    // already hold, link it and return 201 instead of forcing a re-upload.
++    // Falls through to a normal upload session when the blob is not present.
++    if let Some(mount_digest) = mount {
++        if let Some(resp) = try_mount_blob(state, &repo, image_name, mount_digest).await {
++            return resp;
++        }
++    }
++
+     let location = repo.location;
+     let max_upload = state.config.max_upload_size_bytes;
+ 
+@@ -4342,7 +4418,19 @@ async fn catch_all(
+         }
+         ("POST", "uploads") => {
+             let digest = query.get("digest").map(|s| s.as_str()).map(str::to_owned);
+-            handle_start_upload(&state, &headers, &image_name, digest.as_deref(), body).await
++            // OCI cross-repository blob mount hint (`?mount=<digest>&from=<repo>`).
++            // `from` is advisory only: blob storage is content-addressed, so the
++            // blob is located by digest across all repositories.
++            let mount = query.get("mount").map(|s| s.as_str()).map(str::to_owned);
++            handle_start_upload(
++                &state,
++                &headers,
++                &image_name,
++                digest.as_deref(),
++                mount.as_deref(),
++                body,
++            )
++            .await
+         }
+         ("PATCH", "uploads") => {
+             let Some(u) = reference else {
