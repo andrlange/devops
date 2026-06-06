@@ -33,10 +33,13 @@ func (r *RabbitMQ) Provision(ctx context.Context, client *k8sclient.Client, name
 			},
 			"spec": map[string]interface{}{
 				"replicas": int64(1),
-				// Pin RabbitMQ server version (operator 2.21.0 would otherwise default to 4.2.6).
-				// Multi-arch index incl. linux/arm64; pulled direct from Docker Hub like the
-				// operator's own default — matches the CNPG PG-server upstream-pull pattern.
-				"image": "rabbitmq:4.3.1-management",
+				// Pin RabbitMQ server to 4.3.1 (operator 2.21.0 would otherwise default to 4.2.6).
+				// Pulled from the artifactory mirror (-arm64) like the rest of the stack, so fresh
+				// installs are offline / Docker-Hub-rate-limit safe; needs the artifact-keeper-pull secret.
+				"image": "artifactory.cfapps.cool/docker-local/rabbitmq:4.3.1-management-arm64",
+				"imagePullSecrets": []interface{}{
+					map[string]interface{}{"name": "artifact-keeper-pull"},
+				},
 				"resources": map[string]interface{}{
 					"requests": map[string]interface{}{
 						"cpu":    "100m",

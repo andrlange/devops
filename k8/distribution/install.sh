@@ -2636,7 +2636,7 @@ install_phase_7() {
         -o "${BUILD_DIR}/broker" . 2>&1 | tail -1
 
       local BROKER_REGISTRY="${REGISTRY:-artifactory.cfapps.cool}/docker-local"
-      local BROKER_IMAGE="${BROKER_REGISTRY}/cf-service-broker:1.6.0-arm64"  # Wave 10: matches deployment.yaml (was stale 1.3.1)
+      local BROKER_IMAGE="${BROKER_REGISTRY}/cf-service-broker:1.7.0-arm64"  # Wave 10: matches deployment.yaml (was stale 1.3.1)
       local BASE_IMAGE="gcr.io/distroless/static:nonroot"
       local TMPDIR_IMG LAYER
       TMPDIR_IMG=$(mktemp -d)

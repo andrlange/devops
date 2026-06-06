@@ -68,8 +68,12 @@ opensearchproject/opensearch|2.19.5|docker.io/opensearchproject/opensearch
 gitlab/gitlab-ce|18.11.4-ce.0|docker.io/gitlab/gitlab-ce
 gitlab/gitlab-ce|19.0.1-ce.0|docker.io/gitlab/gitlab-ce
 gitlab-org/gitlab-runner|alpine-v19.0.1|docker.io/gitlab/gitlab-runner registry.gitlab.com/gitlab-org/gitlab-runner
-# NOTE: Wave 9/10 images (kpack@ghcr.io, contour/envoy, rabbitmq-op@quay.io,
-# cloudnative-pg, valkey) are mirrored just-in-time in their waves.
+# --- Wave 10 broker-managed workload images (provisioned on demand by cf-service-broker) ---
+rabbitmq|4.3.1-management|docker.io/library/rabbitmq
+valkey/valkey|8.1-alpine|docker.io/valkey/valkey
+ghcr.io/cloudnative-pg/postgresql|18.1-system-trixie|ghcr.io/cloudnative-pg/postgresql
+# NOTE: the cnpg/rabbitmq OPERATOR controller images pull multi-arch direct from ghcr.io
+# (no mirror); kpack@ghcr.io + contour/envoy are mirrored just-in-time in Wave 9.
 TBL
 )
 

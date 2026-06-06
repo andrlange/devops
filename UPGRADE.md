@@ -1292,9 +1292,21 @@ and the CNPG PG-server upstream-pull pattern (no artifactory mirror). **Verified
 → operator stamps `rabbitmq:4.3.1-management`, pod AllReplicasReady, `rabbitmqctl version` = **4.3.1**, bind
 returns full amqp creds; test instance deleted.
 
+**All broker-managed workload images moved to the artifactory mirror (broker `1.7.0`):** previously the
+cf-service-broker's three provisioned services pulled direct from upstream (postgres = CNPG operator default
+ghcr.io; rabbitmq + valkey = Docker Hub). For offline / rate-limit safety and consistency with the
+marketplace-broker (which already used `timescaledb-ha:pg17-arm64` from artifactory), mirrored all three as
+`-arm64` and repointed the provisioners (+ `imagePullSecrets: artifact-keeper-pull`):
+- `rabbitmq:4.3.1-management` → `docker-local/rabbitmq:4.3.1-management-arm64` (`provisioners/rabbitmq.go` `spec.image`)
+- `valkey/valkey:8.1-alpine` → `docker-local/valkey/valkey:8.1-alpine-arm64` (`VALKEY_IMAGE` env + `valkey.go` pull secret)
+- `ghcr.io/cloudnative-pg/postgresql:18.1-system-trixie` → `docker-local/ghcr.io/cloudnative-pg/postgresql:18.1-system-trixie-arm64` (`postgresql.go` `spec.imageName`)
+Added all three to `mirror-platform-images.sh` (install-path inventory). **Verified:** `cf create-service`
+for postgres/valkey/rabbitmq all provision 1/1 with images pulled **from artifactory**; test instances deleted.
+(NOTE: the cnpg/rabbitmq OPERATOR controller images still pull multi-arch direct from ghcr.io — intentional.)
+
 **Go brokers (rebuilt + re-pushed to artifactory `docker-local`):** both `go.mod` → `go 1.26.4`, `k8s.io/*`
 `v0.35.3`→`v0.36.1`, `go mod tidy`, built `linux/arm64`, mirrored via crane.
-- `cf-service-broker` `1.4.0`→`1.5.0`→**`1.6.0-arm64`** (1.6.0 adds the RabbitMQ 4.3.1 pin)
+- `cf-service-broker` `1.4.0`→`1.5.0`→`1.6.0`→**`1.7.0-arm64`** (1.6.0 = RabbitMQ 4.3.1 pin; 1.7.0 = workload images from artifactory)
 - `cf-marketplace-broker` (live `1.1.0`, source-drifted at `1.0.0`) →**`1.2.0-arm64`** (digest `b5c85a20`)
 - Source reconciled: `deployment.yaml` (both), `lib/phase9.sh` (both build steps 1.0.0→1.2.0 / 1.4.0→1.5.0),
   `install.sh` phase7 build tag (stale `1.3.1`→`1.5.0` to match deployment.yaml — was a latent fresh-install

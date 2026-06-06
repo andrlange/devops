@@ -45,6 +45,12 @@ func (p *PostgreSQL) Provision(ctx context.Context, client *k8sclient.Client, na
 			},
 			"spec": map[string]interface{}{
 				"instances": int64(1),
+				// Pin the PG-server image to the artifactory mirror (-arm64) instead of the CNPG
+				// operator's ghcr.io default, so fresh installs pull from one offline-capable source.
+				"imageName": "artifactory.cfapps.cool/docker-local/ghcr.io/cloudnative-pg/postgresql:18.1-system-trixie-arm64",
+				"imagePullSecrets": []interface{}{
+					map[string]interface{}{"name": "artifact-keeper-pull"},
+				},
 				"postgresql": map[string]interface{}{
 					"parameters": map[string]interface{}{
 						"max_connections": "100",

@@ -87,6 +87,8 @@ func (v *Valkey) Provision(ctx context.Context, client *k8sclient.Client, name, 
 					Labels: map[string]string{"app": resName},
 				},
 				Spec: corev1.PodSpec{
+					// Image comes from the artifactory mirror (VALKEY_IMAGE env) — needs the pull secret.
+					ImagePullSecrets: []corev1.LocalObjectReference{{Name: "artifact-keeper-pull"}},
 					Containers: []corev1.Container{
 						{
 							Name:  "valkey",

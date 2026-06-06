@@ -58,7 +58,7 @@ spec:
         - name: artifact-keeper-pull
       containers:
         - name: broker
-          image: artifactory.cfapps.cool/docker-local/cf-service-broker:1.6.0-arm64
+          image: artifactory.cfapps.cool/docker-local/cf-service-broker:1.7.0-arm64
           ports:
             - containerPort: 8080
           env:
@@ -69,7 +69,7 @@ spec:
             - name: SERVICE_NAMESPACE
               value: "cf-services"
             - name: VALKEY_IMAGE
-              value: "valkey/valkey:8.1-alpine"
+              value: "artifactory.cfapps.cool/docker-local/valkey/valkey:8.1-alpine-arm64"
             - name: GARAGE_ADMIN_URL
               value: "http://garage.garage.svc.cluster.local:3903"
             - name: GARAGE_S3_ENDPOINT
