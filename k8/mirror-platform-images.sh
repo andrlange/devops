@@ -28,6 +28,12 @@ TOKEN="${REGISTRY_TOKEN:-}"
 [ -z "$TOKEN" ] && { echo "ERROR: no push token (REGISTRY_TOKEN / tmp.secret / k8/.env.local)"; exit 1; }
 command -v crane >/dev/null || { echo "ERROR: crane not installed"; exit 1; }
 
+# Isolate DOCKER_CONFIG so crane never invokes the macOS Docker Desktop
+# credential helper (credsStore: desktop) — which pops a TCC "access data from
+# other apps" prompt per image. An empty config makes crane store auth inline.
+export DOCKER_CONFIG="${DOCKER_CONFIG:-$(mktemp -d)}"
+[ -f "${DOCKER_CONFIG}/config.json" ] || printf '{}' > "${DOCKER_CONFIG}/config.json"
+
 printf '%s' "$TOKEN" | crane auth login "$REGISTRY" -u admin --password-stdin >/dev/null 2>&1 || true
 
 # Image table:  DEST_PATH | TARGET_TAG | CANDIDATE_SRC_REPOS (space-separated, no tag)

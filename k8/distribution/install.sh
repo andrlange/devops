@@ -36,6 +36,17 @@ if [[ -f "${K8_DIR}/config.env" ]]; then
   source "${K8_DIR}/config.env"
 fi
 
+# --- Isolated DOCKER_CONFIG for crane (avoid Docker Desktop cred helper) ------
+# The host's ~/.docker/config.json typically has `credsStore: "desktop"`, so
+# every crane call (image mirroring) invokes `docker-credential-desktop`, which
+# triggers a macOS "iTerm wants to access data from other apps" TCC prompt per
+# image — dozens of popups during buildpack mirroring. Point crane at a private,
+# empty config (no credsStore) so it stores registry auth as base64 inline and
+# never calls the helper. Affects crane/docker invoked by this script only.
+export DOCKER_CONFIG="${DIST_DIR}/.docker"
+mkdir -p "${DOCKER_CONFIG}"
+[[ -f "${DOCKER_CONFIG}/config.json" ]] || echo '{}' > "${DOCKER_CONFIG}/config.json"
+
 # =============================================================================
 # write_credentials — Generate/update credentials.md with current secrets
 # =============================================================================

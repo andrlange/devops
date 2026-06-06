@@ -29,6 +29,12 @@ BINARIES=(controller webhook build-init build-waiter rebase completion)
 command -v go >/dev/null 2>&1 || { echo "ERROR: go not found. Install with: brew install go"; exit 1; }
 command -v crane >/dev/null 2>&1 || { echo "ERROR: crane not found. Install with: go install github.com/google/go-containerregistry/cmd/crane@latest"; exit 1; }
 
+# Isolate DOCKER_CONFIG so crane never invokes the macOS Docker Desktop
+# credential helper (credsStore: desktop) — which pops a TCC "access data from
+# other apps" prompt per image. An empty config makes crane store auth inline.
+export DOCKER_CONFIG="${DOCKER_CONFIG:-$(mktemp -d)}"
+[ -f "${DOCKER_CONFIG}/config.json" ] || printf '{}' > "${DOCKER_CONFIG}/config.json"
+
 if [ ! -d "${SRC_DIR}" ]; then
   echo "Cloning kpack v${VERSION} sources..."
   git clone --depth 1 --branch "v${VERSION}" https://github.com/buildpacks-community/kpack.git "${SRC_DIR}"

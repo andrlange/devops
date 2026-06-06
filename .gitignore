@@ -31,3 +31,4 @@ CLAUDE.md
 # Temporary migration secrets (registry push token, etc.) — never commit
 tmp.secret
 *.secret
+k8/distribution/.docker/
