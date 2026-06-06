@@ -66,7 +66,7 @@ if [[ -d "${SRC}/host-config" ]]; then
 fi
 
 # Warn if the VM's host mount path no longer exists (start would fail).
-MNT="$(awk '/location:/{print $3; exit}' "${VM_DIR}/lima.yaml" 2>/dev/null | tr -d '"')"
+MNT="$(vm_mount_path "${VM_DIR}/lima.yaml")"
 if [[ -n "$MNT" && ! -d "$MNT" ]]; then
   warn "VM mounts host path '${MNT}' which does not exist here — start may fail until that path exists (it is the k8/ dir from the original install)."
 fi

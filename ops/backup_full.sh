@@ -73,7 +73,7 @@ ok "Host config captured"
   echo "limactl_version:  $(limactl --version 2>/dev/null | head -1)"
   echo "disk_apparent:    $(ls -lh "${VM_DIR}/disk" 2>/dev/null | awk '{print $5}')"
   echo "disk_allocated:   ${disk_alloc}"
-  echo "mount_location:   $(awk '/location:/{print $3; exit}' "${VM_DIR}/lima.yaml" 2>/dev/null | tr -d '\"')"
+  echo "mount_location:   $(vm_mount_path "${VM_DIR}/lima.yaml")"
   echo "kube_context:     ${KUBE_CONTEXT}"
 } > "${DEST}/manifest.txt"
 

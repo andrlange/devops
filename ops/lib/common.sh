@@ -56,6 +56,11 @@ vm_stop() {
   vm_running || return 0
   limactl stop "$LIMA_VM_NAME" >/dev/null 2>&1 || limactl stop -f "$LIMA_VM_NAME"
 }
+# Host path the VM mounts (the mounts: location in lima.yaml — NOT the images:
+# location, which also uses a 'location:' key).
+vm_mount_path() {
+  awk '/^mounts:/{m=1} m && /location:/{print $3; exit}' "$1" 2>/dev/null | tr -d '"'
+}
 
 # --- APFS / volume helpers ---------------------------------------------------
 device_of() { stat -f '%d' "$1" 2>/dev/null; }
