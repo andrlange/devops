@@ -1304,6 +1304,17 @@ Added all three to `mirror-platform-images.sh` (install-path inventory). **Verif
 for postgres/valkey/rabbitmq all provision 1/1 with images pulled **from artifactory**; test instances deleted.
 (NOTE: the cnpg/rabbitmq OPERATOR controller images still pull multi-arch direct from ghcr.io — intentional.)
 
+**Remote registry cleanup (2026-06-06):** the campaign's mirroring was additive-only, so `docker-local` had
+accumulated to **25.0 GB / 26.8 GB (93%)**. Removed **62 stale tags** — korifi Mar-21 build orphans (this
+registry; in-cluster Korifi uses `artifacts.sys`), all `-amd64` (arm64-only stack), and superseded arm64
+versions incl. 3× old GitLab CE upgrade hops → **12.36 GB (46%), 14.49 GB free** (~12.65 GB reclaimed).
+**KEPT:** all current versions, ghcr AK `1.1.9` (Wave-12 migration hop) + `1.2.0`, and `andrlange/*` rc.8 +
+meilisearch (remote AK/Plane B may still run those until Wave 12). Delete mechanism (OCI DELETE is disabled in
+this AK build): `DELETE /api/v1/repositories/docker-local/artifacts/{path}` with the listing `path` field
+**`%2F`-encoded** + an **admin** user (dev/svc-stack tokens can push but not delete); then `POST
+/api/v1/admin/storage-gc`. See memory `reference_ak_registry_delete_api`. TODO: trim the GitLab `18.11.4` hop
+from `mirror-platform-images.sh` in Wave 13 (fresh installs go straight to 19.0.1).
+
 **Go brokers (rebuilt + re-pushed to artifactory `docker-local`):** both `go.mod` → `go 1.26.4`, `k8s.io/*`
 `v0.35.3`→`v0.36.1`, `go mod tidy`, built `linux/arm64`, mirrored via crane.
 - `cf-service-broker` `1.4.0`→`1.5.0`→`1.6.0`→**`1.7.0-arm64`** (1.6.0 = RabbitMQ 4.3.1 pin; 1.7.0 = workload images from artifactory)
