@@ -1381,6 +1381,17 @@ has 0 `/data/storage` refs. Published artifacts now exactly match repo HEAD. The
 **deleted by the user afterward** — note generic-repo writes/deletes need an admin user (dev `AK_TOKEN` is
 docker-push scope only), so a future republish must create a fresh temp admin first.
 
+**Republished v1.2.0 again (2026-06-06, commit `a2cffd7` included):** added the Traefik fix — fresh Korifi
+(Phase 6) installs hung because Traefik v3's 60s `respondingTimeouts.readTimeout` cut kpack's multi-minute
+builder push to the in-cluster artifact-keeper (502/400 → ClusterBuilder never got a latestImage). Fix =
+`--entrypoints.websecure.transport.respondingTimeouts.{read,write,idle}Timeout=900s` in
+`k8/infrastructure/traefik/values.yaml`; **verified on a fresh install** (ClusterBuilder reached Ready=True).
+Rebuilt + republished (delete immutable + re-upload via a fresh `tmp` admin) → new stack sha `1faed728…`;
+download integrity re-verified. See memory `project_traefik_oci_upload_timeout`. A proper upstream
+artifact-keeper fix (OCI **cross-repo blob mount** so kpack stops re-uploading layers) is drafted at
+`plans/patches/ak-oci-cross-repo-blob-mount.patch` (branch `fix/oci-cross-repo-blob-mount` in
+`artifactory/source/backend`) — needs `cargo sqlx prepare`/fmt/clippy/test + a coverage test before PR.
+
 ### Wave 14 — Spring apps — ⏸ DEFERRED
 kappman + petclinic (Spring Boot 4.0.x / Java 25 / Paketo Java 21.4.0 locked triple), after next week's
 upstream Spring release. NOTE: petclinic cf push also blocked by Paketo ca-certificates scanning Korifi
