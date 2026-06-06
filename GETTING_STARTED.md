@@ -6,32 +6,93 @@ This guide walks you through installing the K8s DevOps Stack on an Apple Silicon
 
 ## 1. Prerequisites
 
-- **Hardware:** Apple Silicon Mac — M4, M5 or newer (Pro, Max, or Ultra recommended)
-- **macOS:** 26.0 or later
-- **RAM:** 64 GB minimum
-- **Disk:** 500 GB free space
-- **Registry credentials:** Username and API token provided by your administrator
+Read this whole section first. With the items below, a colleague can install the stack end-to-end.
 
-No other software needs to be installed manually. The installer handles everything else.
+### 1.1 Hardware & OS
+
+- **Hardware:** Apple Silicon Mac — M4, M5 or newer (Pro, Max, or Ultra recommended)
+- **macOS:** 26.0 (Tahoe) or later
+- **RAM:** 64 GB minimum (the Lima VM is sized to 48 GB)
+- **Disk:** ~500 GB free (the VM disk grows to ~70 GB in use, 200 GB max)
+- **Architecture:** arm64 only — the entire stack is ARM64
+
+`installer.sh` verifies the Apple chip generation, macOS version, RAM and free disk up front and stops with a clear message if any requirement isn't met.
+
+### 1.2 Command-line tools — `installer.sh` checks these and offers to install them
+
+You do **not** need to install these by hand. `installer.sh` checks each tool and its minimum version; if any are missing it asks **"N required tool(s) missing. Install automatically? [Y/n]"** and installs them via Homebrew.
+
+| Tool | Min version | Homebrew formula | Purpose |
+|------|-------------|------------------|---------|
+| Homebrew | — | — | Package manager. If missing, the installer offers to install it first (**needs your sudo password**). |
+| Docker Desktop | — | `--cask docker` | Must be **running** before install — the installer pauses until you start it. |
+| Lima | 1.0 | `lima` | Runs the K3s VM (Apple Virtualization.framework). |
+| kubectl | 1.28 | `kubectl` | Kubernetes CLI. |
+| Helm | 3.12 | `helm` | Chart installs. |
+| jq | any | `jq` | JSON parsing. |
+| envsubst | any | `gettext` | Templating. |
+| skopeo | any | `skopeo` | Image inspection. |
+| crane | any | `crane` | Image mirroring. |
+| CF CLI | 8 | `cloudfoundry/tap/cf-cli@8` | `cf push` / services. |
+| Go | 1.26.4 | `go` | Builds the service brokers + kappman. |
+
+Optional tools the installer also offers: **ArgoCD CLI**, **Velero CLI**, **k9s**.
+
+Only two things the installer can't do for you: installing **Homebrew** (needs sudo) and **starting Docker Desktop** (it waits for you).
+
+### 1.3 Container-registry credentials — required
+
+Every image is pulled from the private registry **`artifactory.cfapps.cool`**. `installer.sh` prompts for a **Registry username** and **API Token**, validates them against the registry, and will not proceed without working credentials.
+
+> **You will receive the registry username and API token from Andreas.** Request them before you start.
+
+### 1.4 DNS + DNS-01 credentials — required
+
+The stack issues wildcard TLS certificates with cert-manager via a **DNS-01 challenge**, so you need a DNS zone you control plus a credential that can write records to it:
+
+- **Recommended: Google Cloud DNS** — a managed zone + a service account with the `roles/dns.admin` role, exported as a JSON key. `install.sh` prompts for this key during Iteration Zero.
+- Alternative: **AWS Route 53** — an IAM user with Route 53 write access.
+
+Step-by-step commands are in **Section 3 (DNS Setup)**; the detailed GCP service-account walkthrough is also in `k8/docs/gcp-dns-service-account.md` inside the extracted stack. You'll also add two wildcard A-records pointing at the fixed MetalLB IPs (Section 3).
+
+### 1.5 What `install.sh` asks you (Iteration Zero)
+
+The first time you run `install.sh` it collects, once:
+
+- **DNS zone** + platform/apps subdomain prefixes (defaults: `sys` and `app`)
+- **DNS-01 provider credentials** (the GCP JSON key or Route 53 keys from 1.4)
+- **Lima VM name** (default `k3s-server`; pick a unique name to run more than one stack)
+- Admin **passwords** (auto-generated if you don't supply them)
+
+Everything generated is written to `credentials.md` at the end — store it securely.
 
 ---
 
 ## 2. Quick Start
 
+### Step 0 — Bootstrap from the registry
+
+Download the installer and the stack archive straight from the registry and launch the installer in one command:
+
 ```bash
-# Step 1 — Run on the downloaded archive location
-bash installer.sh
+BASE=https://artifactory.cfapps.cool/api/v1/repositories/generic/download && \
+  curl -sfL $BASE/installer-v1.2.0.sh -o installer.sh && \
+  curl -sfL $BASE/stack-v1.2.0.tgz -o stack.tgz && \
+  bash installer.sh
 ```
 
-This script performs system checks, installs required tools, authenticates with the container registry, and unpacks the stack.
+> These downloads are public, but `installer.sh` then prompts for the **registry username + API token** (Section 1.3) — **you get these from Andreas** — to pull container images.
+
+`installer.sh` performs the system + tool checks (Section 1.2), installs any missing tools (with your confirmation), authenticates to the container registry, verifies the `stack.tgz` checksum, and unpacks the stack to `~/devops-stack`.
+
+### Step 1 — Run the interactive installation wizard
 
 ```bash
-# Step 2 — Run the interactive installation wizard
 cd ~/devops-stack/k8/distribution
 ./install.sh
 ```
 
-The wizard prompts for your domain, DNS provider credentials, and passwords, then deploys the stack in phases.
+The wizard prompts for your domain, DNS provider credentials, and passwords (Iteration Zero, Section 1.5), then deploys the stack in phases.
 
 > **Before running `install.sh`,** complete the DNS setup described in the next section.
 
