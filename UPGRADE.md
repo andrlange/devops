@@ -1250,8 +1250,9 @@ _Checklist:_
 - [x] kpack 0.17.1 self-built **native arm64** (upstream is amd64-only) + deployed; build-arm64.sh + install.sh updated
 - [x] Contour v1.33.5 + Envoy distroless-v1.35.10 (paired); CF API route 200; quickstart pinned + mirrored
 - [x] Korifi unchanged (v0.18.0 latest)
-- [ ] **FOLLOW-UP: in-cluster artifact-keeper 1.2.0 OCI manifest serving is unreliable** → kpack
-      ClusterStore/Builder not-ready → CF builds blocked. Needs a dedicated fix (investigate AK 1.2.0
-      manifest read path / Garage consistency, or restore wave7-ak / await an AK release). 6/7 buildpacks
-      already re-pushed; java + jammy stacks still flap. cf push smoke test deferred until resolved.
+- [x] **RESOLVED (commits c993708/cccab7f): AK kpack/CF manifest failure.** Root cause = korifi repo on
+      filesystem/emptyDir (ephemeral), wiped by Wave 7's restart → converted korifi to s3 (Garage), durable.
+      The "flapping read bug" was a zsh `:l` modifier artifact in repair commands (`$bp:latest`→`${bp:l}atest`)
+      → re-pushed 6 buildpacks to correct tags (bash). kpack ClusterStack/Store/Builder all Ready; pipeline
+      restored. (cf push may still hit the separate petclinic Paketo ca-certs issue.)
 - [x] Committed + pushed
