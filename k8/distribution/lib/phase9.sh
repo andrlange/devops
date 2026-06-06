@@ -170,20 +170,26 @@ run_phase_9() {
 
     local BROKER_URL="http://cf-marketplace-broker.cf-services.svc.cluster.local"
 
-    # Retry registration (broker may need a moment to be fully ready)
-    local retries=5
-    for i in $(seq 1 $retries); do
-      if cf create-service-broker marketplace-broker marketplace-broker "$BROKER_PASSWORD" "$BROKER_URL" --space-scoped 2>/dev/null; then
-        log_success "Marketplace broker registered"
-        break
-      fi
-      if [[ $i -eq $retries ]]; then
-        log_error "Failed to register marketplace broker after $retries attempts"
-        return 1
-      fi
-      log_info "Retry $i/$retries..."
-      sleep 5
-    done
+    # Global broker (matches Phase 7's k8s-services broker; 'cf enable-service-access'
+    # below is global-only, and a global broker needs no targeted space). Idempotent:
+    # skip if already registered so a re-run doesn't fail on "already exists".
+    if cf service-brokers 2>/dev/null | grep -q "marketplace-broker"; then
+      log_info "Marketplace broker already registered"
+    else
+      local retries=5
+      for i in $(seq 1 $retries); do
+        if cf create-service-broker marketplace-broker marketplace-broker "$BROKER_PASSWORD" "$BROKER_URL" 2>/dev/null; then
+          log_success "Marketplace broker registered"
+          break
+        fi
+        if [[ $i -eq $retries ]]; then
+          log_error "Failed to register marketplace broker after $retries attempts"
+          return 1
+        fi
+        log_info "Retry $i/$retries..."
+        sleep 5
+      done
+    fi
 
     # Enable service access
     cf enable-service-access postgres-ai 2>/dev/null || true
@@ -240,6 +246,7 @@ CREDS
     log_step "Updating kappman to V1.1.0 (parameters + service docs)"
 
     local KAPPMAN_DIR="${INSTALL_DIR}/../apps/kappman"
+    cf target -o kappman -s app >/dev/null 2>&1 || true   # cf push needs a targeted space
     (cd "$KAPPMAN_DIR" && cf push kappman) && {
       log_success "kappman updated to V1.1.0"
     } || {
