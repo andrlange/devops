@@ -598,8 +598,8 @@ _Status legend:_ ✅ done · 🔧 done + follow-up resolved · ⬜ not started �
 | 8 | GitLab CE 18.10→18.11.4→19.0.1 + Runner | ✅ done (4d474aa) | | backup each hop | repos/CI green at each stop |
 | 9 | CF/Korifi (kpack 0.17.1, Contour/Envoy; Korifi unchanged) | 🔧 done (dc118e6 + AK fix c993708/cccab7f; `cf push` verified) | | — | `cf push` builds+routes+TLS |
 | 10 | Brokers & operators (CNPG 1.29.1, RabbitMQ 2.21.0, Go rebuild) | ✅ done (`cf marketplace`+bind verified) | | — | `cf marketplace` full, bind works |
-| 11 | **Plane B alignment (otel/router/vault)** | ⬜ not started | 🔴(Mimir) | Runbook C | each remote stack healthy |
-| 12 | **Remote artifact-keeper → 1.2.0 (LAST)** | ⬜ not started | 🔴 | Runbook C | pulls/pushes + generic repo work |
+| 11 | **Plane B — vault (OpenBao) + embedded LGTM** | 🔧 runbook ready | 🔴(Mimir) | `plans/planeb-remote-runbook.md` | remote session executes; vault+LGTM healthy |
+| 12 | **Plane B — artifact-keeper → 1.2.0 (LAST)** | 🔧 runbook ready | 🔴 | runbook Phase 3 | pull-source verified from Plane A |
 | 13 | Re-cut distribution (v1.1.2→v1.2.0) | ⬜ not started | | — | fresh install from new artifacts works |
 | 14 | ⏸ Spring apps (DEFERRED, after Spring release) | ⏸ deferred | | — | apps build+run on new triple |
 
@@ -1330,14 +1330,25 @@ postgresql/valkey/rabbitmq/s3 · `marketplace-broker`: postgres-ai/ai-connector/
 verified** via `cf create-service-key petclinic-db wave10-test` against the upgraded sb 1.5.0 + CNPG-1.29.1
 cluster `pg-f27a2d50` — full credentials returned (incl. `type` field); test key deleted.
 
-### Wave 11 — Plane B alignment (otel / router / vault) 🔴 — ⬜ NOT STARTED
-Align the remote Docker-Compose stacks to in-cluster versions (Runbook C). otel/ Mimir 2.15→3.0 is MAJOR
-(blue/green); Grafana 11→12 (Angular); HAProxy/otel-collector audit. Can run in parallel with Plane A.
+### Wave 11 — Plane B alignment 🔴 — 🔧 RUNBOOK READY (delegated to remote Claude session)
+**Scope corrected (user, 2026-06-06):** the remote Plane B server (`/home/deploy/`, user `deploy` + sudo) runs
+only **vault (OpenBao)** and **artifactory (artifact-keeper)** — there is **no** standalone `router/` or `otel/`
+stack; LGTM/mimir, if present, is **embedded** in those two folders' compose files. So Wave 11 (vault + embedded
+LGTM) and Wave 12 (artifact-keeper) are delivered together as one remote runbook.
+**Execution model:** I cannot steer a remote session directly (sessions are isolated). Authored a self-contained
+**`plans/planeb-remote-runbook.md`** for a **second Claude Code session on the server** to execute, with
+backup-first gates, per-phase `🚦 REPORT` checkpoints (human relays status back here), rollback, and verified
+target tags. vault target: openbao 2.5.4 / pg 18.4 / nginx 1.30.2-alpine / certbot v5.6.0 / collector 0.153.0;
+embedded LGTM aligned to Plane-A Wave-6 (mimir 3.1.0 blue/green, loki 3.7.2, tempo 2.10.5, grafana 12.4.3,
+AngularJS audit).
 
-### Wave 12 — Remote artifact-keeper → 1.2.0 (LAST) 🔴 — ⬜ NOT STARTED
-The pull source (artifactory.cfapps.cool). Reuse the 1.2.0-patched/official images; replace meilisearch with
-OpenSearch; reindex. Strictly last — while down, nothing can pull. Runbook C. **Apply the Wave 7/9 lesson:
-ensure the registry's storage backend is durable (not filesystem-on-ephemeral) so restarts don't drop manifests.**
+### Wave 12 — Remote artifact-keeper → 1.2.0 (LAST) 🔴 — 🔧 RUNBOOK READY (Phase 3 of the Plane B runbook)
+The pull source (artifactory.cfapps.cool). Folded into `plans/planeb-remote-runbook.md` **Phase 3** with the
+Wave-7 lessons baked in: **official** ghcr `…/artifact-keeper-{backend,web}:1.2.0` (drop rc.8-patched),
+meilisearch→**OpenSearch 2.19.5**, env contract (`OPENSEARCH_URL`, `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`,
+explicit `STORAGE_BACKEND` = whatever the server already uses — do NOT switch backends), the **rc.8→1.1.9→1.2.0
+migration hop** (null-decode bug), reindex, and a Plane-A pull test. Strictly last (maintenance window — while
+down nothing can pull); full DB+blob backup first; rollback to rc.8 kept ready.
 
 ### Wave 13 — Re-cut distribution (v1.1.2 → v1.2.0) — ⬜ NOT STARTED
 `./build-distribution.sh`; rename installer-v1.2.0.sh / stack-v1.2.0.tgz; upload to remote generic repo; bump
