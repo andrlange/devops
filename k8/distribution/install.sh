@@ -2656,11 +2656,18 @@ install_phase_7() {
       LAYER=$(mktemp)
       (cd "${TMPDIR_IMG}" && tar cf "${LAYER}" app/)
 
-      crane append --base "${BASE_IMAGE}" --new_tag "${BROKER_IMAGE}" --new_layer "${LAYER}" --platform linux/arm64 2>/dev/null
-      crane mutate "${BROKER_IMAGE}" --entrypoint "/app/broker" --tag "${BROKER_IMAGE}" 2>/dev/null
+      # Best-effort push: the broker image is a pre-published artifact, so a
+      # failed push (no registry write creds — the normal case for a colleague
+      # install) must NOT abort the install. The deploy step pulls the existing
+      # image via the artifact-keeper-pull secret.
+      if crane append --base "${BASE_IMAGE}" --new_tag "${BROKER_IMAGE}" --new_layer "${LAYER}" --platform linux/arm64 2>/dev/null \
+         && crane mutate "${BROKER_IMAGE}" --entrypoint "/app/broker" --tag "${BROKER_IMAGE}" 2>/dev/null; then
+        log_success "Broker image built and pushed: ${BROKER_IMAGE}"
+      else
+        log_warn "Broker push skipped/failed (no registry write creds?) — deploy will use pre-published ${BROKER_IMAGE}"
+      fi
 
       rm -rf "${BUILD_DIR}" "${TMPDIR_IMG}" "${LAYER}"
-      log_success "Broker image built and pushed: ${BROKER_IMAGE}"
     else
       log_warn "go or crane not found — build broker manually: k8/services/cf-service-broker/src"
     fi
