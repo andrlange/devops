@@ -39,7 +39,7 @@ run_phase_9() {
     log_step "Building marketplace broker image"
 
     local BROKER_SRC="${INSTALL_DIR}/../services/cf-marketplace-broker/src"
-    local BROKER_IMAGE="artifactory.cfapps.cool/docker-local/cf-marketplace-broker:1.0.0-arm64"
+    local BROKER_IMAGE="artifactory.cfapps.cool/docker-local/cf-marketplace-broker:1.2.0-arm64"  # Wave 10: go 1.26.4 / k8s.io v0.36.1
     local BASE_IMAGE="artifactory.cfapps.cool/docker-local/gcr.io/distroless/static:nonroot-arm64"
 
     if command -v go &>/dev/null && command -v crane &>/dev/null; then
@@ -73,10 +73,10 @@ run_phase_9() {
 
   # --- Step 2a: Update existing service broker with metadata ---
   if ! component_is_installed "phase9_existing_broker_update" "$STATE_FILE"; then
-    log_step "Updating existing service broker to v1.4.0 (adding service documentation)"
+    log_step "Updating existing service broker to v1.5.0 (Wave 10: go 1.26.4 / k8s.io v0.36.1)"
 
     local EXISTING_BROKER_SRC="${INSTALL_DIR}/../services/cf-service-broker/src"
-    local EXISTING_BROKER_IMAGE="artifactory.cfapps.cool/docker-local/cf-service-broker:1.4.0-arm64"
+    local EXISTING_BROKER_IMAGE="artifactory.cfapps.cool/docker-local/cf-service-broker:1.5.0-arm64"
     local BASE_IMAGE="artifactory.cfapps.cool/docker-local/gcr.io/distroless/static:nonroot-arm64"
 
     if command -v go &>/dev/null && command -v crane &>/dev/null; then
@@ -105,7 +105,7 @@ run_phase_9() {
       kubectl set image deployment/cf-service-broker -n cf-services \
         broker="${EXISTING_BROKER_IMAGE}"
       kubectl rollout status deployment/cf-service-broker -n cf-services --timeout=60s
-      log_success "Existing broker updated to v1.4.0"
+      log_success "Existing broker updated to v1.5.0"
     else
       log_warn "go or crane not found — update broker manually"
     fi

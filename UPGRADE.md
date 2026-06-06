@@ -597,13 +597,13 @@ _Status legend:_ ✅ done · 🔧 done + follow-up resolved · ⬜ not started �
 | 7 | **artifact-keeper in-cluster → 1.2.0 (OpenSearch)** | 🔧 done (08973d4) | 🔴 | Runbook B | search ok, docker-login ok |
 | 8 | GitLab CE 18.10→18.11.4→19.0.1 + Runner | ✅ done (4d474aa) | | backup each hop | repos/CI green at each stop |
 | 9 | CF/Korifi (kpack 0.17.1, Contour/Envoy; Korifi unchanged) | 🔧 done (dc118e6 + AK fix c993708/cccab7f; `cf push` verified) | | — | `cf push` builds+routes+TLS |
-| 10 | Brokers & operators (CNPG, RabbitMQ quay.io, Valkey, Go rebuild) | ⬜ not started | | — | `cf marketplace` full, bind works |
+| 10 | Brokers & operators (CNPG 1.29.1, RabbitMQ 2.21.0, Go rebuild) | ✅ done (`cf marketplace`+bind verified) | | — | `cf marketplace` full, bind works |
 | 11 | **Plane B alignment (otel/router/vault)** | ⬜ not started | 🔴(Mimir) | Runbook C | each remote stack healthy |
 | 12 | **Remote artifact-keeper → 1.2.0 (LAST)** | ⬜ not started | 🔴 | Runbook C | pulls/pushes + generic repo work |
 | 13 | Re-cut distribution (v1.1.2→v1.2.0) | ⬜ not started | | — | fresh install from new artifacts works |
 | 14 | ⏸ Spring apps (DEFERRED, after Spring release) | ⏸ deferred | | — | apps build+run on new triple |
 
-**Progress: Waves 0–9 complete (10/15 incl. deferred), CF data-plane verified via `cf push`. Next: Wave 10.**
+**Progress: Waves 0–10 complete (11/15 incl. deferred), CF data-plane verified via `cf push`; broker plane verified via `cf marketplace`+bind. Next: Wave 11.**
 **Dated operational TODO:** after **2026-08-03** (korifi `korifi-api-internal-cert` self-signed renewal),
 `kubectl rollout restart deploy/korifi-api-deployment -n korifi` to clear the recurring `cf push`/`cf app` 500
 (stale-CA on the log-cache /stats path). See Wave 9 log + memory `project_korifi_api_selfsigned_cert_restart`.
@@ -623,7 +623,7 @@ wave commit + `helm upgrade` back (or `helm rollback <release> <prev-rev> -n <ns
 - **Wave 6:** Loki/Grafana → add `grafana-community` repo, switch chart source; Mimir → ensure TSDB blocks are index-v2 before the image bump.
 - **Wave 8:** strictly `18.10.7 → 18.11.4 → 19.0.1`; after each hop `gitlab-rake db:background_migrations:status` must be clean before the next; runner chart steps 0.87→0.88.3→0.89.1.
 - **Wave 9:** kpack 0.17.1 from ghcr.io mirror; Contour v1.33.5 + Envoy distroless-v1.35.10 (paired — don't bump Envoy alone); Korifi/Service-Binding unchanged; keep Paketo Java 21.4.0.
-- **Wave 10:** pin CNPG 1.29.1/chart 0.28.2 and RabbitMQ op 2.21.0 (quay.io); rebuild Go brokers — `go.mod`: `go 1.26.4`, `k8s.io/* v0.36.1`; rebuild `-arm64`, mirror, bump deployment tags. Operator upgrades roll managed instances — verify each existing service instance survives.
+- **Wave 10:** ✅ done — CNPG 1.29.1/chart 0.28.2 and RabbitMQ op 2.21.0 (stays on **ghcr.io**, not quay.io — earlier note was wrong); rebuilt Go brokers — `go.mod`: `go 1.26.4`, `k8s.io/* v0.36.1`; `-arm64`, mirror, bump deployment tags (sb 1.5.0, mb 1.2.0). Operator upgrades rolled managed PG instances in place — both verified healthy.
 - **Wave 13:** `./build-distribution.sh`; rename to `installer-v1.2.0.sh`/`stack-v1.2.0.tgz`; upload to remote generic repo (see root CLAUDE.md commands); bump installer pre-flight Go check to 1.26.4; write `UPGRADE-v1.2.0.md`.
 
 ---
@@ -937,7 +937,7 @@ so both the upgrade *and a clean install* can pull them; fix moved upstream sour
   **opensearch 2.19.5** (Wave 7), gitlab-ce 18.11.4-ce.0 **and** 19.0.1-ce.0 (the required-stop hop),
   gitlab-runner alpine-v19.0.1.
 - **Deferred to their waves (mirror just-in-time, moved sources):** kpack → **ghcr.io** (Wave 9),
-  RabbitMQ operator → **quay.io** (Wave 10), Contour/Envoy (Wave 9), CloudNativePG/Valkey (Wave 10).
+  RabbitMQ operator → **ghcr.io** (Wave 10 — multi-arch, pulled direct, no mirror), Contour/Envoy (Wave 9), CloudNativePG → **ghcr.io** (Wave 10 — multi-arch, pulled direct).
   These aren't `docker-local` refs today and need per-wave handling.
 
 _Checklist:_
@@ -1271,11 +1271,32 @@ _Checklist:_
       (verified `cf app` shows live stats). **Recurs ~every 90d (next renewal 2026-08-03)** → restart again;
       dated TODO in §3.1 + memory `project_korifi_api_selfsigned_cert_restart`.
 
-### Wave 10 — Brokers & operators — ⬜ NOT STARTED
-Planned: CloudNativePG (chart 0.28.2 / op 1.29.1), RabbitMQ cluster-operator → quay.io (op 2.21.0), Valkey,
-and rebuild the two Go brokers (cf-service-broker / cf-marketplace-broker: `go 1.26.4`, `k8s.io/* v0.36.1`,
-`-arm64`, mirror, bump deployment tags). Operator upgrades roll managed instances — verify each existing
-service instance survives. Exit: `cf marketplace` full + bind works. See §2.6 / Wave-10 plan note.
+### Wave 10 — Brokers & operators — ✅ DONE (2026-06-06)
+**Operators (bumped in place; both already pull multi-arch images directly from ghcr.io — preserved that
+existing pattern, no artifactory mirror needed):**
+- **CloudNativePG** chart `0.27.1`→`0.28.2`, app `1.28.1`→`1.29.1` (`helm upgrade cnpg` + install.sh bumped).
+  Operator rolled both managed PG clusters in place ("Primary instance is being restarted without a switchover",
+  single-instance → brief downtime, PVC data preserved). **Verified both `pg-d4e347fa` + `pg-f27a2d50` returned
+  to healthy state** (PG 18.1 unchanged).
+- **RabbitMQ cluster-operator** `v2.20.0`→`v2.21.0` (`kubectl apply` upstream manifest + install.sh URL bumped).
+  Operator pod Ready. No managed RabbitMQ clusters live → zero-risk. **CORRECTION:** the plan note said the
+  image "moves to quay.io" — it does **not**; v2.21.0 manifest still uses `ghcr.io/rabbitmq/cluster-operator:2.21.0`
+  (multi-arch). §2.6 note was wrong; image source unchanged.
+
+**Go brokers (rebuilt + re-pushed to artifactory `docker-local`):** both `go.mod` → `go 1.26.4`, `k8s.io/*`
+`v0.35.3`→`v0.36.1`, `go mod tidy`, built `linux/arm64`, mirrored via crane.
+- `cf-service-broker` `1.4.0`→**`1.5.0-arm64`** (digest `b5bc2315`)
+- `cf-marketplace-broker` (live `1.1.0`, source-drifted at `1.0.0`) →**`1.2.0-arm64`** (digest `b5c85a20`)
+- Source reconciled: `deployment.yaml` (both), `lib/phase9.sh` (both build steps 1.0.0→1.2.0 / 1.4.0→1.5.0),
+  `install.sh` phase7 build tag (stale `1.3.1`→`1.5.0` to match deployment.yaml — was a latent fresh-install
+  ImagePullBackOff). Live deploy via `kubectl set image` (preserves OpenBao-seded broker password).
+- `go vet` clean both; mb has no tests; the 2 `TestS3*` failures in sb are **pre-existing** (Garage admin API
+  v1/v2 mock drift, HTTP-only, unrelated to the k8s bump — proven identical on pre-Wave-10 committed code).
+
+**Exit criteria MET:** `cf marketplace` lists all 7 offerings across both brokers (`k8s-services`:
+postgresql/valkey/rabbitmq/s3 · `marketplace-broker`: postgres-ai/ai-connector/openbao-secrets). **Bind
+verified** via `cf create-service-key petclinic-db wave10-test` against the upgraded sb 1.5.0 + CNPG-1.29.1
+cluster `pg-f27a2d50` — full credentials returned (incl. `type` field); test key deleted.
 
 ### Wave 11 — Plane B alignment (otel / router / vault) 🔴 — ⬜ NOT STARTED
 Align the remote Docker-Compose stacks to in-cluster versions (Runbook C). otel/ Mimir 2.15→3.0 is MAJOR

@@ -49,7 +49,7 @@ spec:
         - name: artifact-keeper-pull
       containers:
         - name: broker
-          image: artifactory.cfapps.cool/docker-local/cf-marketplace-broker:1.0.0-arm64
+          image: artifactory.cfapps.cool/docker-local/cf-marketplace-broker:1.2.0-arm64
           ports:
             - containerPort: 8081
           env:

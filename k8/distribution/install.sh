@@ -2553,7 +2553,7 @@ install_phase_7() {
   if ! component_is_installed "phase7_cnpg" "$STATE_FILE"; then
     log_step "Installing CloudNativePG operator..."
     helm repo add cnpg https://cloudnative-pg.github.io/charts 2>/dev/null || true
-    helm install cnpg cnpg/cloudnative-pg --version 0.27.1 -n cnpg-system --create-namespace 2>&1 | tail -1   # pinned Wave 0 (was unpinned); target chart 0.28.2 / app 1.29.1
+    helm install cnpg cnpg/cloudnative-pg --version 0.28.2 -n cnpg-system --create-namespace 2>&1 | tail -1   # Wave 10: chart 0.28.2 / app 1.29.1 (was 0.27.1/1.28.1)
     wait_for_pods "cnpg-system" 120
     log_success "CloudNativePG operator installed"
     mark_component_installed "phase7_cnpg" "$STATE_FILE"
@@ -2562,8 +2562,8 @@ install_phase_7() {
   # --- Install RabbitMQ Cluster Operator ---
   if ! component_is_installed "phase7_rabbitmq_operator" "$STATE_FILE"; then
     log_step "Installing RabbitMQ Cluster Operator..."
-    # pinned Wave 0 (was 'latest'); currently 2.20.0. Target 2.21.0 — note registry moves to quay.io.
-    kubectl apply -f https://github.com/rabbitmq/cluster-operator/releases/download/v2.20.0/cluster-operator.yml 2>&1 | tail -3
+    # Wave 10: 2.21.0 (was 2.20.0). Image stays on ghcr.io/rabbitmq/cluster-operator (multi-arch; the "moves to quay.io" plan note was wrong).
+    kubectl apply -f https://github.com/rabbitmq/cluster-operator/releases/download/v2.21.0/cluster-operator.yml 2>&1 | tail -3
     wait_for_pods "rabbitmq-system" 120
     log_success "RabbitMQ Cluster Operator installed"
     mark_component_installed "phase7_rabbitmq_operator" "$STATE_FILE"
@@ -2636,7 +2636,7 @@ install_phase_7() {
         -o "${BUILD_DIR}/broker" . 2>&1 | tail -1
 
       local BROKER_REGISTRY="${REGISTRY:-artifactory.cfapps.cool}/docker-local"
-      local BROKER_IMAGE="${BROKER_REGISTRY}/cf-service-broker:1.3.1-arm64"
+      local BROKER_IMAGE="${BROKER_REGISTRY}/cf-service-broker:1.5.0-arm64"  # Wave 10: matches deployment.yaml (was stale 1.3.1)
       local BASE_IMAGE="gcr.io/distroless/static:nonroot"
       local TMPDIR_IMG LAYER
       TMPDIR_IMG=$(mktemp -d)
