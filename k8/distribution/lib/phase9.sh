@@ -257,7 +257,7 @@ CREDS
   fi
 
   mark_phase_complete 9 "$STATE_FILE"
-  phase_timer_end 9
+  phase_timer_stop 9
 
   log_success "Phase 9 complete — Marketplace Extension 1: AI/ML Services"
   echo ""
