@@ -2127,7 +2127,7 @@ GCEOF
     curl -sk "${LOCAL_AK}/api/v1/repositories" \
       -H "Authorization: Bearer ${AK_TOKEN}" \
       -H "Content-Type: application/json" \
-      -d '{"key":"korifi","name":"Korifi Container Images","format":"docker","repo_type":"local","is_public":true}' 2>&1 | tail -1
+      -d '{"key":"korifi","name":"Korifi Container Images","format":"docker","repo_type":"local","is_public":true,"storage_backend":"s3"}' 2>&1 | tail -1
 
     # Ensure repo is public (for kpack pull access)
     local REPO_ID
