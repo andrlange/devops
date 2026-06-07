@@ -1,4 +1,4 @@
-# K8s DevOps Stack — A Self-Contained Developer Platform
+# K8s/Cloudfoundry DevOps Stack — A Self-Contained Developer Platform
 
 <p align="center">
   <img src="assets/dep-overview.png" alt="K8s DevOps Stack — platform overview" width="80%" />
