@@ -98,6 +98,102 @@ The wizard prompts for your domain, DNS provider credentials, and passwords (Ite
 
 ---
 
+## 2a. What to expect during the run (and when it asks you something)
+
+The install is mostly hands-off, but there are a few points where it **waits for a decision or for you to press ENTER**. Here's the whole flow in order:
+
+### Before anything — have these ready
+- **Registry username + API token** — *you get these from Andreas* (Section 1.3).
+- **DNS-01 credential** — a GCP Cloud DNS service-account JSON key (recommended) or Route 53 keys (Section 1.4 / Section 3).
+- Your **DNS zone** name and the **platform/apps subdomain** prefixes you want (defaults `sys` / `app`).
+
+### `installer.sh` (bootstrap) — interactions
+1. **System checks** (chip, macOS, RAM, disk) run automatically.
+2. **Missing tools** → it asks **`N required tool(s) missing. Install automatically? [Y/n]`** → press **Enter/Y** to let it `brew install` them.
+3. **Docker Desktop** must be running → if it isn't, it pauses with **`Please start Docker Desktop, then press Enter to continue…`**.
+4. **Registry login** → prompts **`Registry username:`** and **`API Token:`** (the creds from Andreas), validates them, and logs in.
+5. Verifies the `stack.tgz` checksum and unpacks to `~/devops-stack`.
+
+### `install.sh` Iteration Zero — collect config, then confirm
+On first run it collects everything once (press **Enter** to accept each default in `[...]`):
+- **DNS zone** (e.g. `example.com`) + **platform/apps subdomain** prefixes (`sys` / `app`)
+- **VM sizing** — CPUs / RAM (GB) / disk (GB)
+- **DNS-01 provider credentials** (paste the GCP JSON key path / Route 53 keys)
+- Admin **passwords** (auto-generated if left blank)
+
+Then it shows a **Configuration Summary** and asks you to **confirm it `[Y/n]`** — this is your *"use this config?"* checkpoint. Answer **n** to re-enter anything.
+
+### Phase 1 — the DNS pause (the one manual step mid-install)
+After MetalLB comes up, Phase 1 prints the **two wildcard A-records** to create and **waits**:
+
+```
+Press ENTER when DNS records have been configured...
+```
+
+At this point, add these to your DNS zone (IPs are fixed on every Apple Silicon Mac), then press **ENTER**:
+
+| Record | Points to |
+|--------|-----------|
+| `*.sys.<your-zone>`  | `192.168.64.200` |
+| `*.app.<your-zone>`  | `192.168.64.203` |
+
+(See Section 3 for the full DNS setup. cert-manager needs these to issue the wildcard TLS certs.)
+
+### Optional later prompts
+- **`Add KUBECONFIG to ~/.zshrc? [Y/n]`** — convenience; **Y** lets you run `kubectl` without exporting it each shell.
+- **Optional phases (6–9)** — Cloud Foundry / brokers / kappman / AI services are optional and each asks **`Continue with Phase N (…)? [Y/n]`**. Press **n** to stop at a smaller footprint, **Y** for the full PaaS.
+
+### What's NORMAL during phases (don't panic)
+You'll see lots of these while images pull and pods start:
+
+```
+[WARN]    Not all pods Ready yet in 'garage' — retrying in 30s...
+[WARN]    Some pods in '...' still not Ready. Continuing anyway.
+```
+
+**This is expected** — the installer is just waiting for containers to pull/start, retries automatically, and moves on. Big components (ArgoCD, GitLab, Grafana, Korifi) can take a few minutes each. Only an explicit `[ERROR]` that stops the script needs attention.
+
+### Expected duration (example — Apple **M5**)
+
+Roughly **~45 minutes end-to-end** for the full stack (all 9 phases) on an M5. Per-phase (first run, cold image cache):
+
+```
+  Phase 1  5m 42s     Foundation (Lima, K3s, OpenBao, ESO, MetalLB, Traefik, cert-manager)
+  Phase 2  7m 10s     Platform (ArgoCD, Portainer, Garage, Technitium, Velero)
+  Phase 3  3m 56s     Monitoring (Loki, Mimir, Tempo, Alloy, KSM, node-exporter, Grafana)
+  Phase 4  1m 40s     Services (artifact-keeper, PostgreSQL, OpenSearch)
+  Phase 5  5m 24s     GitLab CE
+  Phase 6  12m 10s    Cloud Foundry / Korifi   ← longest (kpack builder assembly)
+  Phase 7  1m 40s     CF Service Brokers
+  Phase 8  2m 58s     kappman
+  Phase 9  2m 2s      Marketplace Extension 1 (AI/ML)
+```
+
+A successful run ends with `[OK]  Installation complete!`, the timing summary, and an **Installation Status** report — all phases `Complete`, every component `[x]`, the node `Ready`, and the platform endpoints `UP`:
+
+```
+========== Installation Status ==========
+Phases
+  Phase 1  Foundation ...                                   Complete (…)
+  … (all phases Complete)
+Components
+  [x] Lima VM + K3s        …
+  [x] OpenBao              …
+  … (every component checked)
+Cluster Health
+  lima-k3s-server   Ready   control-plane   …   v1.36.1+k3s1   …
+Service Endpoints
+  Traefik     https://traefik.sys.<zone>     UP (302)
+  ArgoCD      https://argocd.sys.<zone>      UP (200)
+  Portainer   https://portainer.sys.<zone>   UP (307)
+  Grafana     https://grafana.sys.<zone>     UP (302)
+  Technitium  https://dns.sys.<zone>         UP (200)
+```
+
+You can re-print this anytime with `./k8/stack.sh status`.
+
+---
+
 ## 3. DNS Setup
 
 The stack uses wildcard TLS certificates issued by cert-manager via DNS-01 challenge. You must configure DNS records and a service account with DNS write access before starting the installation.
@@ -309,25 +405,60 @@ kubectl rollout restart deployment/<name> -n <namespace>
 
 ## 8. Cloud Foundry: Organizations, Spaces and kappman
 
-### Creating Orgs and Spaces
+### CF admin credentials — how to authenticate
+
+Cloud Foundry admin access is **certificate-based**, not password-based. The installer created a
+dedicated kubeconfig context called **`cf-admin`** (a client cert mapped to Korifi's admin user), and the
+`cf` CLI authenticates as whatever kubeconfig context is currently active. So you don't enter a password —
+you switch context and authenticate against it:
 
 ```bash
-# Switch to CF admin context
-./k8/stack.sh switch
+# Toggle kubectl between the cluster-admin and cf-admin contexts (the "stack command")
+./k8/stack.sh switch          # → switches to 'cf-admin' (run again to switch back)
+./k8/stack.sh context         # show which context is active
 
-# Login to CF API
+# Point the cf CLI at your API and authenticate as the (cert-backed) admin
+cf api https://api.<apps-domain> --skip-ssl-validation
+cf auth cf-admin
+```
+
+- The **CF API URL** and the **kappman login** (`admin` / `change_me`) are recorded in `credentials.md`.
+- There is **no CF admin password** to store — access is the `cf-admin` client cert in your kubeconfig. Keep your kubeconfig safe; that *is* the credential.
+- Always `./k8/stack.sh switch` **back** to the `k3s-<vm>` context for normal `kubectl` work.
+
+### First org, space, and app (push the html-demo)
+
+A complete first run, from login to a live app:
+
+```bash
+# 1. Authenticate as CF admin
+./k8/stack.sh switch
 cf api https://api.<apps-domain> --skip-ssl-validation
 cf auth cf-admin
 
-# Create an org and space
-cf create-org my-org
-cf target -o my-org
+# 2. Create an org + space and target them
+cf create-org demo
+cf target -o demo
 cf create-space dev
-cf target -o my-org -s dev
+cf target -o demo -s dev
 
-# Deploy an app
-cf push my-app
+# 3. Push the bundled html-demo (a tiny static site via the httpd buildpack)
+cd ~/devops-stack/demos/html
+cf push          # uses demos/html/manifest.yml (name: html-demo)
+
+# 4. Open it
+#    → https://html-demo.<apps-domain>
+cf apps
+cf app html-demo
 ```
+
+The first `cf push` triggers a **kpack build** (source → droplet) and may take a couple of minutes while the
+buildpack image is fetched; subsequent pushes are faster. A Java example (`demos/petclinic`, needs a
+`postgresql` service — see the marketplace below) follows the same pattern.
+
+> If you created the `demo` org/space via the CLI and don't see them in **kappman**, run
+> `./k8/stack.sh refresh-kappman` (see below) — though on a current install kappman is a see-all admin and
+> picks up new orgs automatically.
 
 ### kappman (Korifi Apps Manager UI)
 
