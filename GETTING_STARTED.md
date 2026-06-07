@@ -452,9 +452,38 @@ cf apps
 cf app html-demo
 ```
 
-The first `cf push` triggers a **kpack build** (source → droplet) and may take a couple of minutes while the
-buildpack image is fetched; subsequent pushes are faster. A Java example (`demos/petclinic`, needs a
-`postgresql` service — see the marketplace below) follows the same pattern.
+A successful push looks like this (trimmed) — `cf` uploads your source, **Korifi stages it with kpack** (here
+the httpd buildpack), saves the built droplet image, and starts the app `1/1`:
+
+```text
+Pushing app html-demo to org demo / space dev as cf-admin...
+Manifest applied                     # name: html-demo · buildpack: paketo-buildpacks/httpd · route: html-demo.app.<zone>
+Uploading files...  34.72 KiB  100%
+
+Staging app and tracing logs...
+   Pulling  artifacts.sys.<zone>/korifi/<guid>-packages@sha256:…    # your uploaded source
+   paketo-buildpacks/httpd 1.0.7
+     Selected Apache HTTP Server version: 2.4.67
+     Installing Apache HTTP Server 2.4.67
+   Adding layer 'paketo-buildpacks/httpd:httpd'
+   Saving  artifacts.sys.<zone>/korifi/<guid>-droplets...           # the built image
+   Build successful
+
+Waiting for app html-demo to start...
+Instances starting...
+
+name:              html-demo
+requested state:   started
+routes:            html-demo.app.<zone>
+type:            web
+instances:       1/1                 # ← app is up
+start command:   httpd "-f" "/workspace/httpd.conf" "-k" "start" "-DFOREGROUND"
+#0   running     …
+```
+
+The first `cf push` triggers a **kpack build** (source → droplet) and takes a couple of minutes while the
+buildpack/Apache layers download; subsequent pushes reuse cached layers and are much faster. A Java example
+(`demos/petclinic`, needs a `postgresql` service — see the marketplace below) follows the same pattern.
 
 > If you created the `demo` org/space via the CLI and don't see them in **kappman**, run
 > `./k8/stack.sh refresh-kappman` (see below) — though on a current install kappman is a see-all admin and
