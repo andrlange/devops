@@ -2078,6 +2078,16 @@ GCEOF
     local KPACK_TAG="0.17.1-arm64"
     local KPACK_REGISTRY="${REGISTRY:-artifactory.cfapps.cool}/docker-local"
 
+    # crane uses an isolated DOCKER_CONFIG (no host creds), and we only ever log
+    # crane into the IN-CLUSTER registry elsewhere — so authenticate it to the
+    # REMOTE registry here. Without this, 'crane manifest' below returns
+    # UNAUTHORIZED, the gate is false, the arm64 patch is silently skipped, and
+    # kpack keeps the upstream amd64 images → runs under QEMU (SIGSEGV) →
+    # ClusterStore never reconciles → 'buildpack not present in ClusterStore'.
+    if [[ -n "${REGISTRY_USER:-}" && -n "${REGISTRY_PASS:-}" ]]; then
+      printf '%s' "${REGISTRY_PASS}" | crane auth login "${REGISTRY:-artifactory.cfapps.cool}" -u "${REGISTRY_USER}" --password-stdin >/dev/null 2>&1 || true
+    fi
+
     # Check if ARM64 images exist in registry
     if crane manifest "${KPACK_REGISTRY}/kpack/controller:${KPACK_TAG}" &>/dev/null; then
       # Patch controller and webhook deployments
