@@ -1,5 +1,9 @@
 # K8s DevOps Stack — A Self-Contained Developer Platform
 
+<p align="center">
+  <img src="assets/dep-overview.png" alt="K8s DevOps Stack — platform overview" width="80%" />
+</p>
+
 A complete, GitOps-managed **developer platform** that runs on a single Apple Silicon Mac. It turns
 one machine into a private cloud: push an app with `cf push`, get a URL, a database, a message queue,
 object storage, real TLS, metrics, logs, traces, and backups — all without a public cloud account.
